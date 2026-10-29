@@ -2,10 +2,18 @@ import { createButton } from '../components/button.js';
 import { createThemeToggle, getBrandLogoUrl } from '../components/theme.js';
 import { toast } from '../components/toast.js';
 import { apiFetch } from '../services/api.js';
-import { renderClientesModule } from './clientes.js';
-import { renderProveedoresModule } from './proveedores.js';
-import { renderPerfilesMensajesModule } from './perfiles-mensajes.js';
-import { renderReciclajeModule } from './reciclaje.js';
+import { renderClientesModule } from './clientes.js?v=20261029_5';
+import { renderProveedoresModule } from './proveedores.js?v=20261029_5';
+import { renderPerfilesMensajesModule } from './perfiles-mensajes.js?v=20261029_5';
+import { renderDifusionMensajesModule } from './difusion-mensajes.js?v=20261029_5';
+import { renderReciclajeModule } from './reciclaje.js?v=20261029_5';
+import {
+  subscribeQueue,
+  formatRemainingDuration,
+  syncPendingTasksFromDB,
+  setPreferredBroadcastTab,
+  clearCompletedBroadcastBanner,
+} from '../services/queue-manager.js?v=20261029_5';
 
 export const MENU_MODULES = [
   { id: 'dashboard', label: 'Panel General', icon: 'fa-solid fa-table-cells-large', roles: ['admin', 'editor', 'viewer'] },
@@ -191,11 +199,15 @@ export function renderDashboardLayout(container, { user, activeModule = 'dashboa
   const statusBadge = document.createElement('button');
   statusBadge.type = 'button';
   statusBadge.className =
-    'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border border-amber-200/80 dark:border-amber-800/60 hover:bg-amber-100/70 dark:hover:bg-amber-900/50 transition-colors shrink-0';
+    'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200/80 dark:border-emerald-800/60 hover:bg-emerald-100/70 dark:hover:bg-emerald-900/50 transition-colors shrink-0 cursor-pointer';
   statusBadge.innerHTML = `
-    <i class="fa-solid fa-circle text-[6px] text-amber-500" aria-hidden="true"></i>
-    <span class="hidden sm:inline">Desconectado · Iniciar sesión</span>
-    <span class="sm:hidden">Desconectado</span>
+    <span class="relative flex h-2 w-2">
+      <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+      <span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+    </span>
+    <i class="fa-brands fa-whatsapp text-emerald-600 dark:text-emerald-400 text-xs" aria-hidden="true"></i>
+    <span class="hidden sm:inline">WhatsApp Online</span>
+    <span class="sm:hidden">Online</span>
   `;
   statusBadge.addEventListener('click', () => {
     if (typeof onNavigate === 'function') {
@@ -203,7 +215,94 @@ export function renderDashboardLayout(container, { user, activeModule = 'dashboa
     }
   });
 
-  headerLeft.append(menuToggleBtn, pageTitle, statusBadge);
+  // Indicadores en vivo en la parte superior al lado del estado Online de WhatsApp:
+  // 1) Progreso de Difusión en curso (conteo de enviados + barra de progreso)
+  // 2) Cuenta regresiva de Mensaje Programado (tiempo que falta + barra de progreso)
+  const headerQueueBox = document.createElement('div');
+  headerQueueBox.className = 'flex items-center gap-2 overflow-x-auto no-scrollbar';
+
+  syncPendingTasksFromDB();
+
+  subscribeQueue((snap) => {
+    headerQueueBox.innerHTML = '';
+
+    // Píldora de Difusión Masiva en curso o recién completada
+    if (snap.broadcast.active || (snap.broadcast.completed && snap.broadcast.total > 0)) {
+      const b = snap.broadcast;
+      const bPill = document.createElement('div');
+      bPill.className =
+        'inline-flex items-center gap-2 px-3 py-1 rounded-full text-[11px] font-semibold bg-brand-soft/80 dark:bg-brand/20 text-brand border border-brand/30 shrink-0';
+
+      const goBtn = document.createElement('button');
+      goBtn.type = 'button';
+      goBtn.title = 'Ver progreso de la campaña de difusión';
+      goBtn.className = 'inline-flex items-center gap-2 cursor-pointer focus:outline-none';
+      goBtn.innerHTML = `
+        <i class="fa-solid ${b.active ? 'fa-bullhorn fa-beat-fade' : 'fa-circle-check'} text-xs"></i>
+        <span>
+          Difusión: <strong>${b.sent}/${b.total}</strong> enviados (${b.progressPercent}%)
+          ${b.active ? `<span class="text-[10px] opacity-80 ml-1">· próx. ${b.secondsToNext}s</span>` : ''}
+        </span>
+        <span class="w-16 sm:w-24 h-1.5 rounded-full bg-white/80 dark:bg-slate-800 overflow-hidden inline-flex">
+          <span class="h-full bg-brand transition-all duration-300" style="width: ${b.progressPercent}%"></span>
+        </span>
+      `;
+      goBtn.addEventListener('click', () => {
+        setPreferredBroadcastTab('difusion');
+        if (typeof onNavigate === 'function') onNavigate('broadcast');
+      });
+      bPill.appendChild(goBtn);
+
+      if (!b.active && b.completed) {
+        const closeDoneBtn = document.createElement('button');
+        closeDoneBtn.type = 'button';
+        closeDoneBtn.title = 'Ocultar aviso';
+        closeDoneBtn.className = 'text-brand hover:text-brand-active ml-0.5 cursor-pointer';
+        closeDoneBtn.innerHTML = '<i class="fa-solid fa-xmark text-[10px]"></i>';
+        closeDoneBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          clearCompletedBroadcastBanner();
+        });
+        bPill.appendChild(closeDoneBtn);
+      }
+
+      headerQueueBox.appendChild(bPill);
+    }
+
+    // Píldora de Mensaje(s) Programado(s) con tiempo restante y barra de progreso
+    if (snap.scheduled.length > 0) {
+      const nextSched = snap.scheduled[0];
+      const extraCount = snap.scheduled.length - 1;
+      const destName =
+        nextSched.nombreDestinatario && nextSched.nombreDestinatario !== '—'
+          ? nextSched.nombreDestinatario
+          : nextSched.telefonoDestinatario;
+
+      const sPill = document.createElement('button');
+      sPill.type = 'button';
+      sPill.title = 'Ver mensaje programado en cola';
+      sPill.className =
+        'inline-flex items-center gap-2 px-3 py-1 rounded-full text-[11px] font-semibold bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border border-amber-200/80 dark:border-amber-800/60 shrink-0 cursor-pointer hover:bg-amber-100/70 transition-colors';
+      sPill.innerHTML = `
+        <i class="fa-regular fa-clock text-amber-500 text-xs"></i>
+        <span>
+          Programado (${ destName }): falta <strong>${formatRemainingDuration(nextSched.remainingSeconds)}</strong>
+          ${extraCount > 0 ? `<span class="text-[10px] opacity-80">(+${extraCount} más)</span>` : ''}
+        </span>
+        <span class="w-14 sm:w-20 h-1.5 rounded-full bg-amber-200/60 dark:bg-slate-800 overflow-hidden inline-flex">
+          <span class="h-full bg-amber-500 transition-all duration-300" style="width: ${nextSched.progressPercent}%"></span>
+        </span>
+      `;
+      sPill.addEventListener('click', () => {
+        setPreferredBroadcastTab('programar');
+        if (typeof onNavigate === 'function') onNavigate('broadcast');
+      });
+
+      headerQueueBox.appendChild(sPill);
+    }
+  });
+
+  headerLeft.append(menuToggleBtn, pageTitle, statusBadge, headerQueueBox);
 
   const headerRight = document.createElement('div');
   headerRight.className = 'flex items-center gap-2 shrink-0';
@@ -238,19 +337,25 @@ export function renderDashboardLayout(container, { user, activeModule = 'dashboa
   mainArea.dataset.module = currentMod.id;
   mainArea.className = 'app-module-area p-4 sm:p-6';
 
-  if (currentMod.id === 'clientes') {
-    renderClientesModule(mainArea);
-  } else if (currentMod.id === 'proveedor') {
-    renderProveedoresModule(mainArea);
-  } else if (currentMod.id === 'mensajes') {
-    renderPerfilesMensajesModule(mainArea);
-  } else if (currentMod.id === 'reciclaje') {
-    renderReciclajeModule(mainArea);
-  }
-
   contentCol.append(header, mainArea);
   shell.append(mobileOverlay, sidebar, contentCol);
   container.appendChild(shell);
+
+  try {
+    if (currentMod.id === 'clientes') {
+      renderClientesModule(mainArea);
+    } else if (currentMod.id === 'proveedor') {
+      renderProveedoresModule(mainArea);
+    } else if (currentMod.id === 'mensajes') {
+      renderPerfilesMensajesModule(mainArea);
+    } else if (currentMod.id === 'broadcast') {
+      renderDifusionMensajesModule(mainArea);
+    } else if (currentMod.id === 'reciclaje') {
+      renderReciclajeModule(mainArea);
+    }
+  } catch (err) {
+    console.error('[Error renderizando módulo]', err);
+  }
 
   return { mainArea };
 }

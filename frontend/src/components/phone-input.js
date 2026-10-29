@@ -199,18 +199,32 @@ export const COUNTRIES = [
 ];
 
 export function createPhoneInput({
+  label = '',
   defaultDial = '+595',
   defaultNumber = '',
+  initialCode = '',
+  initialNumber = '',
   placeholder = 'Ej. 986 901 117 (sin 0)',
   showHelper = true,
+  helperText = '',
   required = false,
   idPrefix = 'phone',
+  onChange = null,
 } = {}) {
+  const effectiveDial = initialCode || defaultDial || '+595';
+  const effectiveNum = initialNumber || defaultNumber || '';
   let selectedCountry =
-    COUNTRIES.find((c) => c.dial === defaultDial) || COUNTRIES[0];
+    COUNTRIES.find((c) => c.dial === effectiveDial) || COUNTRIES[0];
 
   const root = document.createElement('div');
   root.className = 'relative w-full';
+
+  if (label) {
+    const labelEl = document.createElement('label');
+    labelEl.className = 'block text-xs font-semibold text-slate-700 dark:text-slate-200 mb-1.5';
+    labelEl.innerHTML = `${label} ${required ? '<span class="text-danger">*</span>' : ''}`;
+    root.appendChild(labelEl);
+  }
 
   // Contenedor unido (botón de país + input de número)
   const inputGroup = document.createElement('div');
@@ -235,11 +249,24 @@ export function createPhoneInput({
   const numberInput = document.createElement('input');
   numberInput.id = `${idPrefix}-number`;
   numberInput.type = 'tel';
-  numberInput.value = defaultNumber;
+  numberInput.value = effectiveNum;
   numberInput.placeholder = placeholder;
   numberInput.required = required;
   numberInput.className =
     'flex-1 min-w-0 min-h-[40px] px-3.5 py-2 text-xs sm:text-sm bg-transparent text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none';
+
+  function emitChange() {
+    if (typeof onChange === 'function') {
+      const cleanNum = numberInput.value.trim().replace(/^0+/, '');
+      onChange({
+        code: selectedCountry.dial,
+        number: cleanNum,
+        fullNumber: cleanNum ? `${selectedCountry.dial}${cleanNum}` : '',
+      });
+    }
+  }
+
+  numberInput.addEventListener('input', emitChange);
 
   inputGroup.append(triggerBtn, numberInput);
   root.appendChild(inputGroup);
@@ -248,7 +275,11 @@ export function createPhoneInput({
   const helperEl = document.createElement('p');
   helperEl.className = 'mt-1.5 text-[11px] text-slate-500 dark:text-slate-400';
   function updateHelperText() {
-    helperEl.innerHTML = `Escriba el número sin el 0 inicial (ej: <strong class="font-semibold text-slate-600 dark:text-slate-300">986901117</strong>). Se guardará con código <strong class="font-semibold text-slate-600 dark:text-slate-300">${selectedCountry.dial}</strong>.`;
+    if (helperText) {
+      helperEl.textContent = helperText;
+    } else {
+      helperEl.innerHTML = `Escriba el número sin el 0 inicial (ej: <strong class="font-semibold text-slate-600 dark:text-slate-300">986901117</strong>). Se guardará con código <strong class="font-semibold text-slate-600 dark:text-slate-300">${selectedCountry.dial}</strong>.`;
+    }
   }
   if (showHelper) {
     updateHelperText();
@@ -317,6 +348,7 @@ export function createPhoneInput({
         selectedCountry = c;
         updateTriggerLabel();
         if (showHelper) updateHelperText();
+        emitChange();
         closeDropdown();
         numberInput.focus();
       });
@@ -362,6 +394,10 @@ export function createPhoneInput({
     element: root,
     getCodigo: () => selectedCountry.dial,
     getNumero: () => numberInput.value.trim().replace(/^0+/, ''),
+    getFullNumber: () => {
+      const cleanNum = numberInput.value.trim().replace(/^0+/, '').replace(/[^\d]/g, '');
+      return cleanNum ? `${selectedCountry.dial}${cleanNum}` : '';
+    },
     setValues: (dial = '+595', num = '') => {
       selectedCountry = COUNTRIES.find((c) => c.dial === dial) || COUNTRIES[0];
       numberInput.value = num || '';

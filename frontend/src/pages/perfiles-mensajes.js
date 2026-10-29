@@ -1294,6 +1294,7 @@ export function renderPerfilesMensajesModule(container) {
     container.appendChild(pageWrapper);
   }
 
-  loadRealRecipients().then(() => fetchPerfiles());
+  fetchPerfiles();
+  loadRealRecipients();
 }
 

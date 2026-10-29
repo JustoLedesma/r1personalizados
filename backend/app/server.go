@@ -38,6 +38,7 @@ func Run() {
 	clientesHandler := handlers.NewClientesHandler(dbConn)
 	proveedoresHandler := handlers.NewProveedoresHandler(dbConn)
 	perfilesMensajesHandler := handlers.NewPerfilesMensajesHandler(dbConn)
+	difusionMensajesHandler := handlers.NewDifusionMensajesHandler(dbConn)
 	reciclajeHandler := handlers.NewReciclajeHandler(dbConn)
 
 	mux := http.NewServeMux()
@@ -63,6 +64,10 @@ func Run() {
 	mux.HandleFunc("/api/perfiles-mensajes", perfilesMensajesHandler.HandleCollection)
 	mux.HandleFunc("/api/perfiles-mensajes/", perfilesMensajesHandler.HandleItem)
 
+	// Rutas del módulo Difusión y Mensajes
+	mux.HandleFunc("/api/difusion-mensajes", difusionMensajesHandler.HandleCollection)
+	mux.HandleFunc("/api/difusion-mensajes/", difusionMensajesHandler.HandleItem)
+
 	// Rutas del módulo Reciclaje
 	mux.HandleFunc("/api/reciclaje", reciclajeHandler.List)
 	mux.HandleFunc("/api/reciclaje/restaurar", reciclajeHandler.Restore)
@@ -79,6 +84,9 @@ func Run() {
 			auth.WriteJSONError(w, http.StatusNotFound, "ruta no encontrada")
 			return
 		}
+		w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+		w.Header().Set("Pragma", "no-cache")
+		w.Header().Set("Expires", "0")
 		target := filepath.Join(frontendDir, cleanPath)
 		info, err := os.Stat(target)
 		if err != nil || info.IsDir() {

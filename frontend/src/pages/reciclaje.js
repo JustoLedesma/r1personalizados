@@ -136,6 +136,7 @@ export function renderReciclajeModule(container) {
       { value: 'clientes', label: 'Clientes' },
       { value: 'proveedor', label: 'Proveedor' },
       { value: 'mensajes', label: 'Perfiles de Mensajes' },
+      { value: 'difusion', label: 'Difusión y Mensajes' },
       { value: 'pagos', label: 'Pagos' },
       { value: 'pedidos', label: 'Pedidos' },
       { value: 'presupuestos', label: 'Presupuestos' },

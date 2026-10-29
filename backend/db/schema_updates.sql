@@ -159,3 +159,31 @@ INSERT IGNORE INTO `perfiles_mensajes` (`id`, `titulo`, `categoria`, `descripcio
   (2, 'Saludo Inicial', 'Saludo', 'Saludo diario para iniciar conversación comercial', '¡Hola {nombre}! Espero que tengas un excelente día. ¿En qué podemos colaborarte hoy?', 1),
   (3, 'Recordatorio de Pedido', 'Recordatorio', 'Notificar que el pedido está listo para entrega o retiro', 'Estimado/a {nombre}, le informamos que su pedido se encuentra listo para entrega / retiro. Por favor confírmenos su disponibilidad.', 1),
   (4, 'Agradecimiento', 'General', 'Agradecer la preferencia tras finalizar la atención o entrega', '¡Muchas gracias por tu preferencia, {nombre}! Nos alegra atenderte. Que tengas un excelente día. ✨', 1);
+
+-- ============================================================================
+-- Módulo: Difusión y Mensajes (Historial de todos los envíos sin excepción)
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS `mensajes_historial` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `tipo` VARCHAR(40) NOT NULL DEFAULT 'Mensaje',
+  `contacto_origen` VARCHAR(40) NULL DEFAULT 'Manual',
+  `nombre_destinatario` VARCHAR(200) NOT NULL DEFAULT '—',
+  `telefono_destinatario` VARCHAR(60) NOT NULL,
+  `plantilla_titulo` VARCHAR(160) NULL,
+  `contenido` TEXT NOT NULL,
+  `adjunto_nombre` VARCHAR(255) NULL,
+  `adjunto_formato` VARCHAR(40) NULL,
+  `adjunto_mime` VARCHAR(100) NULL,
+  `adjunto_data` LONGTEXT NULL,
+  `intervalo_segundos` INT NOT NULL DEFAULT 0,
+  `programado_para` DATETIME NULL DEFAULT NULL,
+  `estado` VARCHAR(40) NOT NULL DEFAULT 'Enviado',
+  `deleted_at` DATETIME NULL DEFAULT NULL,
+  `deleted_by` VARCHAR(150) NULL DEFAULT NULL,
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX `idx_mensajes_historial_tipo` (`tipo`),
+  INDEX `idx_mensajes_historial_telefono` (`telefono_destinatario`),
+  INDEX `idx_mensajes_historial_estado` (`estado`),
+  INDEX `idx_mensajes_historial_deleted_at` (`deleted_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

@@ -313,6 +313,59 @@ func (h *ReciclajeHandler) List(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// 4. Difusión y Mensajes en reciclaje
+	if modulo == "" || modulo == "difusion" || modulo == "difusión y mensajes" || modulo == "mensajes_historial" {
+		rows, err := h.DB.QueryContext(r.Context(), `
+			SELECT
+				id, COALESCE(tipo, 'Mensaje'), COALESCE(nombre_destinatario, '—'),
+				COALESCE(telefono_destinatario, ''), COALESCE(contenido, ''),
+				COALESCE(adjunto_nombre, ''), COALESCE(adjunto_formato, ''), COALESCE(estado, 'Enviado'),
+				created_at, updated_at, COALESCE(deleted_by, 'Operador Ventas'), deleted_at
+			FROM mensajes_historial
+			WHERE deleted_at IS NOT NULL
+			ORDER BY deleted_at DESC
+		`)
+		if err == nil {
+			for rows.Next() {
+				var (
+					idNum                                                       int
+					tipo, nombreDest, telDest, cont, adjNombre, adjFormato, est string
+					deletedBy                                                   string
+					createdAt, updatedAt, deletedAtTime                         time.Time
+				)
+				if scanErr := rows.Scan(
+					&idNum, &tipo, &nombreDest, &telDest, &cont, &adjNombre, &adjFormato, &est,
+					&createdAt, &updatedAt, &deletedBy, &deletedAtTime,
+				); scanErr == nil {
+					campos := []RecycleField{
+						{Label: "Tipo de Envío", Value: nonEmptyOrDash(tipo)},
+						{Label: "Nombre del Destinatario", Value: nonEmptyOrDash(nombreDest)},
+						{Label: "Teléfono WhatsApp", Value: nonEmptyOrDash(telDest)},
+						{Label: "Mensaje Enviado", Value: nonEmptyOrDash(cont)},
+						{Label: "Archivo Adjunto", Value: nonEmptyOrDash(strings.TrimSpace(adjNombre + " (" + adjFormato + ")"))},
+						{Label: "Estado", Value: nonEmptyOrDash(est)},
+					}
+					item := RecycleItem{
+						ID:            idNum,
+						Modulo:        "Difusión y Mensajes",
+						Identificador: telDest,
+						Nombre:        nombreDest + " (" + tipo + ")",
+						Detalle:       cont,
+						CreatedAt:     createdAt,
+						UpdatedAt:     updatedAt,
+						DeletedBy:     deletedBy,
+						DeletedAt:     deletedAtTime,
+						Campos:        campos,
+					}
+					if q == "" || matchesRecycleSearch(item, q) {
+						allItems = append(allItems, item)
+					}
+				}
+			}
+			rows.Close()
+		}
+	}
+
 	sort.Slice(allItems, func(i, j int) bool {
 		return allItems[i].DeletedAt.After(allItems[j].DeletedAt)
 	})
@@ -382,6 +435,12 @@ func (h *ReciclajeHandler) Restore(w http.ResponseWriter, r *http.Request) {
 		_, err := h.DB.ExecContext(r.Context(), "UPDATE perfiles_mensajes SET deleted_at = NULL, deleted_by = NULL WHERE id = ?", req.ID)
 		if err != nil {
 			auth.WriteJSONError(w, http.StatusInternalServerError, "no se pudo restaurar el perfil de mensaje")
+			return
+		}
+	case "difusión y mensajes", "difusion", "mensajes_historial":
+		_, err := h.DB.ExecContext(r.Context(), "UPDATE mensajes_historial SET deleted_at = NULL, deleted_by = NULL WHERE id = ?", req.ID)
+		if err != nil {
+			auth.WriteJSONError(w, http.StatusInternalServerError, "no se pudo restaurar el mensaje del historial")
 			return
 		}
 	default:
