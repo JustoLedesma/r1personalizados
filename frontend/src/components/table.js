@@ -54,14 +54,14 @@ export function createDataTable({
       const searchWrap = document.createElement('div');
       searchWrap.className = 'relative w-full sm:max-w-xs';
       searchWrap.innerHTML = `
-        <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 text-xs"></i>
+        <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 text-xs" aria-hidden="true"></i>
       `;
       const input = document.createElement('input');
       input.type = 'search';
       input.value = currentSearch;
       input.placeholder = searchPlaceholder;
       input.className =
-        'w-full min-h-[40px] pl-9 pr-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/80 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-brand';
+        'w-full min-h-[38px] pl-9 pr-3 py-1.5 text-xs sm:text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/80 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-brand';
       input.addEventListener('input', (e) => {
         currentSearch = e.target.value;
         currentPage = 1;
@@ -76,21 +76,55 @@ export function createDataTable({
       container.appendChild(toolbar);
     }
 
+    const tableWrap = document.createElement('div');
+    tableWrap.className = 'w-full overflow-x-auto';
+
+    const table = document.createElement('table');
+    table.className = 'w-full text-left border-collapse';
+
+    const thead = document.createElement('thead');
+    thead.className =
+      'bg-slate-50/80 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-800 text-[11px] uppercase tracking-wider text-slate-500 dark:text-slate-400 font-semibold';
+    const trHead = document.createElement('tr');
+
+    columns.forEach((col) => {
+      const th = document.createElement('th');
+      th.className = `px-4 py-3 select-none ${col.align === 'right' ? 'text-right' : 'text-left'}`;
+      th.textContent = col.label;
+      if (col.sortable) {
+        th.classList.add('cursor-pointer', 'hover:text-slate-800', 'dark:hover:text-slate-200');
+        th.addEventListener('click', () => {
+          if (sortKey === col.key) {
+            sortAsc = !sortAsc;
+          } else {
+            sortKey = col.key;
+            sortAsc = true;
+          }
+          render();
+        });
+      }
+      trHead.appendChild(th);
+    });
+
+    thead.appendChild(trHead);
+    table.appendChild(thead);
+    tableWrap.appendChild(table);
+    container.appendChild(tableWrap);
+
     // Estado de error
     if (error) {
       const errBox = document.createElement('div');
-      errBox.className = 'p-8 text-center flex flex-col items-center gap-3';
+      errBox.className = 'py-12 px-4 text-center flex flex-col items-center gap-3';
       errBox.innerHTML = `
-        <div class="w-10 h-10 rounded-full bg-red-100 dark:bg-red-950/60 text-danger flex items-center justify-center">
-          <i class="fa-solid fa-circle-exclamation"></i>
+        <div class="text-danger text-2xl">
+          <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
         </div>
-        <p class="text-sm font-medium text-slate-700 dark:text-slate-300">${error}</p>
+        <p class="text-xs sm:text-sm font-medium text-slate-700 dark:text-slate-300">${error}</p>
       `;
       if (typeof onRetry === 'function') {
         errBox.appendChild(
           createButton({
             text: 'Reintentar',
-            icon: 'fa-solid fa-rotate-right',
             variant: 'primary',
             size: 'sm',
             onClick: () => onRetry(),
@@ -135,8 +169,8 @@ export function createDataTable({
     const totalItems = total !== null ? total : filtered.length;
     if (totalItems === 0) {
       const emptyBox = document.createElement('div');
-      emptyBox.className = 'p-10 text-center text-sm text-slate-400 dark:text-slate-500';
-      emptyBox.innerHTML = `<i class="fa-regular fa-folder-open text-xl mb-2 block"></i>${emptyMessage}`;
+      emptyBox.className = 'py-12 px-4 text-center text-xs sm:text-sm text-slate-400 dark:text-slate-500';
+      emptyBox.innerHTML = `<i class="fa-regular fa-folder-open text-xl mb-2 block" aria-hidden="true"></i>${emptyMessage}`;
       container.appendChild(emptyBox);
       return;
     }
@@ -153,39 +187,6 @@ export function createDataTable({
         : usePagination
           ? filtered.slice(startIdx, startIdx + effectivePageSize)
           : filtered;
-
-    const tableWrap = document.createElement('div');
-    tableWrap.className = 'w-full overflow-x-auto';
-
-    const table = document.createElement('table');
-    table.className = 'w-full text-left border-collapse';
-
-    const thead = document.createElement('thead');
-    thead.className =
-      'bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-800 text-xs uppercase text-slate-500 dark:text-slate-400 font-semibold';
-    const trHead = document.createElement('tr');
-
-    columns.forEach((col) => {
-      const th = document.createElement('th');
-      th.className = `px-4 py-3 select-none ${col.align === 'right' ? 'text-right' : 'text-left'}`;
-      th.textContent = col.label;
-      if (col.sortable) {
-        th.classList.add('cursor-pointer', 'hover:text-slate-800', 'dark:hover:text-slate-200');
-        th.addEventListener('click', () => {
-          if (sortKey === col.key) {
-            sortAsc = !sortAsc;
-          } else {
-            sortKey = col.key;
-            sortAsc = true;
-          }
-          render();
-        });
-      }
-      trHead.appendChild(th);
-    });
-
-    thead.appendChild(trHead);
-    table.appendChild(thead);
 
     const tbody = document.createElement('tbody');
     tbody.className = 'divide-y divide-slate-200 dark:divide-slate-800 text-sm text-slate-700 dark:text-slate-200';
@@ -209,8 +210,6 @@ export function createDataTable({
     });
 
     table.appendChild(tbody);
-    tableWrap.appendChild(table);
-    container.appendChild(tableWrap);
 
     // Paginación únicamente cuando hay más de 20 registros
     if (usePagination) {
@@ -285,4 +284,3 @@ export function createDataTable({
   render();
   return container;
 }
-

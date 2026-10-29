@@ -13,8 +13,16 @@ Eres un desarrollador senior full-stack. Este documento es la fuente de verdad: 
 - **Notificaciones** Todas las notificaciones deben venir de Flashy.js
 - **Logo azul** logo de color azul, https://netz.com.py/route1/img/header/NETZ-IA.svg obligatorio
 - **Logo blanco** logo de color blanco https://netz.com.py/route1/img/header/NETZ-BLANCO.svg obligatorio
+- **Icon** usar icono para el sistema en la parte dela pestaña este: https://netz.com.py/route1/img/header/N-SVG.svg obligatorio
 - **Rutas** desarollado en local, pero necesito que funcione en un vps dentro de un contenedor con ngix, es necesario que todas las rutas funcionen automaticamente al levantar el servicio
 - **Acceso a la DB** usuario y contraseña por defecto debemos usar USER: root PASS: L3d35m41991@Ju5t0
+ - **Modificaciones de Base de Datos (SQL Directo)**
+- **Formato obligatorio:** Para cualquier creación, ajuste o modificación en la estructura de la base de datos (tablas, relaciones, índices), el agente DEBE generar únicamente el código en SQL plano (raw SQL).
+- **Prohibición de herramientas:** Está estrictamente prohibido utilizar, sugerir o generar archivos para frameworks de migración (como golang-migrate) o funciones de auto-migración de ORMs.
+- **Entrega de código:** El código SQL debe entregarse en bloques de texto limpios y directos, listos para que el usuario los copie y pegue en la consola de comandos de MySQL/MariaDB.
+- **Historial (Opcional):** Cuando se generen cambios estructurales, sugiere al usuario guardar la sentencia SQL en un archivo centralizado (ej. `/backend/db/schema_updates.sql`) para mantener un registro manual de los cambios en el repositorio.
+- **Borrado de datos desde el sistema** Nada del sistema se debe borrar, cuando se hace click en un icono oboton para borrar debe pedir confirmacion y solo simular el borrado, luego debe ocultar de esa vista, y debajo de Usuario y Roles crear un modulo de Reciclaje que ahi debe aparecer todos los archivos o datos borrados
+
 - No agregues dependencias nuevas sin justificarlas en una línea.
 
 ## 2. Estructura sugerida

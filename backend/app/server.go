@@ -2,10 +2,13 @@ package app
 
 import (
 	"database/sql"
+	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"r1/backend/internal/auth"
@@ -32,6 +35,7 @@ func Run() {
 	}
 
 	authHandler := handlers.NewAuthHandler(dbConn)
+	clientesHandler := handlers.NewClientesHandler(dbConn)
 
 	mux := http.NewServeMux()
 
@@ -43,6 +47,10 @@ func Run() {
 	}
 	registerAuthRoutes("/auth")
 	registerAuthRoutes("/api/auth")
+
+	// Rutas del módulo Clientes
+	mux.HandleFunc("/api/clientes", clientesHandler.HandleCollection)
+	mux.HandleFunc("/api/clientes/", clientesHandler.HandleItem)
 
 	frontendDir := resolveDir("frontend", "../frontend")
 	logoDir := resolveDir("logo", "../logo", "frontend/logo")
@@ -65,15 +73,36 @@ func Run() {
 		fileServer.ServeHTTP(w, r)
 	})
 
-	port := strings.TrimSpace(os.Getenv("PORT"))
-	if port == "" {
-		port = "8080"
+	startPort := 8081
+	if envPort := strings.TrimSpace(os.Getenv("PORT")); envPort != "" {
+		if p, convErr := strconv.Atoi(envPort); convErr == nil && p > 0 {
+			startPort = p
+		}
 	}
 
-	log.Printf("Servidor R1 iniciado en http://localhost:%s", port)
-	if err := http.ListenAndServe(":"+port, mux); err != nil {
+	listener, boundPort, err := listenAvailablePort(startPort, 20)
+	if err != nil {
 		log.Fatalf("error fatal en servidor HTTP: %v", err)
 	}
+
+	log.Printf("Servidor R1 iniciado en http://localhost:%d", boundPort)
+	if err := http.Serve(listener, mux); err != nil {
+		log.Fatalf("error fatal en servidor HTTP: %v", err)
+	}
+}
+
+func listenAvailablePort(startPort int, maxAttempts int) (net.Listener, int, error) {
+	for i := 0; i < maxAttempts; i++ {
+		port := startPort + i
+		ln, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
+		if err == nil {
+			if i > 0 {
+				log.Printf("[AVISO PUERTO] El puerto %d estaba ocupado; usando automáticamente el puerto %d", startPort, port)
+			}
+			return ln, port, nil
+		}
+	}
+	return nil, 0, fmt.Errorf("no se encontró ningún puerto libre entre %d y %d", startPort, startPort+maxAttempts-1)
 }
 
 func resolveDir(candidates ...string) string {

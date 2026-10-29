@@ -2,6 +2,7 @@ import { createButton } from '../components/button.js';
 import { createThemeToggle, getBrandLogoUrl } from '../components/theme.js';
 import { toast } from '../components/toast.js';
 import { apiFetch } from '../services/api.js';
+import { renderClientesModule } from './clientes.js';
 
 export const MENU_MODULES = [
   { id: 'dashboard', label: 'Panel General', icon: 'fa-solid fa-table-cells-large', roles: ['admin', 'editor', 'viewer'] },
@@ -227,11 +228,15 @@ export function renderDashboardLayout(container, { user, activeModule = 'dashboa
   headerRight.append(themeToggle, logoutBtn);
   header.append(headerLeft, headerRight);
 
-  // Área asignada principal (toma toda el área asignada, vacía para desarrollar por partes)
+  // Área asignada principal (toma toda el área asignada)
   const mainArea = document.createElement('main');
   mainArea.id = 'module-workspace';
   mainArea.dataset.module = currentMod.id;
   mainArea.className = 'app-module-area p-4 sm:p-6';
+
+  if (currentMod.id === 'clientes') {
+    renderClientesModule(mainArea);
+  }
 
   contentCol.append(header, mainArea);
   shell.append(mobileOverlay, sidebar, contentCol);
