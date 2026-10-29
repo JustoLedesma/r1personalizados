@@ -37,6 +37,7 @@ func Run() {
 	authHandler := handlers.NewAuthHandler(dbConn)
 	clientesHandler := handlers.NewClientesHandler(dbConn)
 	proveedoresHandler := handlers.NewProveedoresHandler(dbConn)
+	perfilesMensajesHandler := handlers.NewPerfilesMensajesHandler(dbConn)
 	reciclajeHandler := handlers.NewReciclajeHandler(dbConn)
 
 	mux := http.NewServeMux()
@@ -57,6 +58,10 @@ func Run() {
 	// Rutas del módulo Proveedor
 	mux.HandleFunc("/api/proveedores", proveedoresHandler.HandleCollection)
 	mux.HandleFunc("/api/proveedores/", proveedoresHandler.HandleItem)
+
+	// Rutas del módulo Perfiles de Mensajes
+	mux.HandleFunc("/api/perfiles-mensajes", perfilesMensajesHandler.HandleCollection)
+	mux.HandleFunc("/api/perfiles-mensajes/", perfilesMensajesHandler.HandleItem)
 
 	// Rutas del módulo Reciclaje
 	mux.HandleFunc("/api/reciclaje", reciclajeHandler.List)

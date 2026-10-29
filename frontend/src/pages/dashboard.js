@@ -4,6 +4,7 @@ import { toast } from '../components/toast.js';
 import { apiFetch } from '../services/api.js';
 import { renderClientesModule } from './clientes.js';
 import { renderProveedoresModule } from './proveedores.js';
+import { renderPerfilesMensajesModule } from './perfiles-mensajes.js';
 import { renderReciclajeModule } from './reciclaje.js';
 
 export const MENU_MODULES = [
@@ -241,6 +242,8 @@ export function renderDashboardLayout(container, { user, activeModule = 'dashboa
     renderClientesModule(mainArea);
   } else if (currentMod.id === 'proveedor') {
     renderProveedoresModule(mainArea);
+  } else if (currentMod.id === 'mensajes') {
+    renderPerfilesMensajesModule(mainArea);
   } else if (currentMod.id === 'reciclaje') {
     renderReciclajeModule(mainArea);
   }

@@ -64,6 +64,20 @@ function formatDateTimeFull(isoStr) {
   return `${fecha} a las ${hora}`;
 }
 
+function formatShortDateTime(isoStr) {
+  if (!isoStr) return '-';
+  const d = new Date(isoStr);
+  if (Number.isNaN(d.getTime())) return String(isoStr);
+  return d.toLocaleString('es-PY', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
+}
+
 function formatDateOnly(dateStr) {
   if (!dateStr) return '-';
   const parts = String(dateStr).split('-');
@@ -231,6 +245,21 @@ export function renderClientesModule(container, { subRoute = 'lista' } = {}) {
       onRetry: () => fetchClientes(),
       columns: [
         {
+          key: 'id',
+          label: 'ID',
+          sortable: true,
+          render: (row) => {
+            const idBtn = document.createElement('button');
+            idBtn.type = 'button';
+            idBtn.title = 'Ver vista previa del cliente';
+            idBtn.className =
+              'text-xs font-bold text-slate-600 dark:text-slate-300 hover:text-brand dark:hover:text-brand hover:underline cursor-pointer focus:outline-none';
+            idBtn.textContent = `#${row.id}`;
+            idBtn.addEventListener('click', () => openDetailView(row));
+            return idBtn;
+          },
+        },
+        {
           key: 'tipoCliente',
           label: 'TIPO',
           render: (row) => {
@@ -245,7 +274,7 @@ export function renderClientesModule(container, { subRoute = 'lista' } = {}) {
         },
         {
           key: 'documento',
-          label: 'DOCUMENTO',
+          label: 'DOCUMENTO / RUC',
           render: (row) => {
             const wrap = document.createElement('div');
             const docText =
@@ -263,9 +292,12 @@ export function renderClientesModule(container, { subRoute = 'lista' } = {}) {
             wrap.appendChild(linkBtn);
 
             if (row.tipoCliente !== 'empresa' && row.ruc) {
-              const rucSub = document.createElement('div');
-              rucSub.className = 'text-[11px] text-slate-400';
+              const rucSub = document.createElement('button');
+              rucSub.type = 'button';
+              rucSub.className =
+                'block text-[11px] text-slate-400 hover:text-brand hover:underline text-left cursor-pointer focus:outline-none';
               rucSub.textContent = `RUC: ${row.ruc}`;
+              rucSub.addEventListener('click', () => openDetailView(row));
               wrap.appendChild(rucSub);
             }
             return wrap;
@@ -322,6 +354,18 @@ export function renderClientesModule(container, { subRoute = 'lista' } = {}) {
           key: 'ciudad',
           label: 'CIUDAD',
           render: (row) => `<span class="text-xs text-slate-600 dark:text-slate-300">${row.ciudad || '-'}</span>`,
+        },
+        {
+          key: 'createdAt',
+          label: 'FECHA CREADA',
+          sortable: true,
+          render: (row) => `<span class="text-xs text-slate-500 dark:text-slate-400">${formatShortDateTime(row.createdAt)}</span>`,
+        },
+        {
+          key: 'updatedAt',
+          label: 'FECHA MODIFICADA',
+          sortable: true,
+          render: (row) => `<span class="text-xs text-slate-500 dark:text-slate-400">${formatShortDateTime(row.updatedAt)}</span>`,
         },
         {
           key: 'estado',

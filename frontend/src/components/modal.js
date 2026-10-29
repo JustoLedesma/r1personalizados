@@ -51,8 +51,34 @@ export function openModal({
 
   const titleEl = document.createElement('h2');
   titleEl.id = titleId;
-  titleEl.className = 'text-base font-bold text-slate-900 dark:text-slate-100';
+  titleEl.className = 'text-base sm:text-lg font-bold text-slate-900 dark:text-slate-100';
   titleEl.textContent = title;
+
+  const headerActions = document.createElement('div');
+  headerActions.className = 'flex items-center gap-1';
+
+  let isExpanded = false;
+  const baseSizeClass = sizeMap[size] || sizeMap.md;
+
+  const expandBtn = createButton({
+    variant: 'ghost',
+    size: 'sm',
+    icon: 'fa-solid fa-expand',
+    ariaLabel: 'Expandir o contraer ventana modal',
+    onClick: () => {
+      isExpanded = !isExpanded;
+      const iconEl = expandBtn.querySelector('i');
+      if (isExpanded) {
+        dialog.classList.remove(baseSizeClass, 'max-h-[92vh]', 'sm:max-h-[85vh]');
+        dialog.classList.add('max-w-6xl', 'h-[94vh]', 'max-h-[94vh]');
+        if (iconEl) iconEl.className = 'fa-solid fa-compress';
+      } else {
+        dialog.classList.remove('max-w-6xl', 'h-[94vh]', 'max-h-[94vh]');
+        dialog.classList.add(baseSizeClass, 'max-h-[92vh]', 'sm:max-h-[85vh]');
+        if (iconEl) iconEl.className = 'fa-solid fa-expand';
+      }
+    },
+  });
 
   const closeBtn = createButton({
     variant: 'ghost',
@@ -62,7 +88,8 @@ export function openModal({
     onClick: () => attemptClose(),
   });
 
-  header.append(titleEl, closeBtn);
+  headerActions.append(expandBtn, closeBtn);
+  header.append(titleEl, headerActions);
 
   // Cuerpo con scroll interno
   const body = document.createElement('div');

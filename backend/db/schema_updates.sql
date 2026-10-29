@@ -12,7 +12,10 @@ CREATE TABLE IF NOT EXISTS `roles` (
   `id` INT AUTO_INCREMENT PRIMARY KEY,
   `name` VARCHAR(50) NOT NULL UNIQUE,
   `description` VARCHAR(255) NULL,
-  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+  `deleted_at` DATETIME NULL DEFAULT NULL,
+  `deleted_by` VARCHAR(150) NULL DEFAULT NULL,
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 INSERT IGNORE INTO `roles` (`id`, `name`, `description`) VALUES
@@ -29,6 +32,8 @@ CREATE TABLE IF NOT EXISTS `users` (
   `role_id` INT NOT NULL DEFAULT 1,
   `modulos` JSON NULL,
   `active` TINYINT(1) NOT NULL DEFAULT 1,
+  `deleted_at` DATETIME NULL DEFAULT NULL,
+  `deleted_by` VARCHAR(150) NULL DEFAULT NULL,
   `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   CONSTRAINT `fk_users_role` FOREIGN KEY (`role_id`) REFERENCES `roles`(`id`)
@@ -117,3 +122,40 @@ CREATE TABLE IF NOT EXISTS `proveedores` (
   INDEX `idx_proveedores_estado` (`estado`),
   INDEX `idx_proveedores_deleted_at` (`deleted_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ============================================================================
+-- Actualización para tablas roles y users ya existentes (MySQL 8+)
+-- ============================================================================
+-- ALTER TABLE `roles`
+--   ADD COLUMN `deleted_at` DATETIME NULL DEFAULT NULL,
+--   ADD COLUMN `deleted_by` VARCHAR(150) NULL DEFAULT NULL,
+--   ADD COLUMN `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP;
+--
+-- ALTER TABLE `users`
+--   ADD COLUMN `deleted_at` DATETIME NULL DEFAULT NULL,
+--   ADD COLUMN `deleted_by` VARCHAR(150) NULL DEFAULT NULL;
+
+-- ============================================================================
+-- Módulo: Perfiles de Mensajes con soporte para Reciclaje y Variables Dinámicas
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS `perfiles_mensajes` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `titulo` VARCHAR(160) NOT NULL,
+  `categoria` VARCHAR(80) NOT NULL DEFAULT 'General',
+  `descripcion` VARCHAR(255) NULL,
+  `contenido` TEXT NOT NULL,
+  `activo` TINYINT(1) NOT NULL DEFAULT 1,
+  `deleted_at` DATETIME NULL DEFAULT NULL,
+  `deleted_by` VARCHAR(150) NULL DEFAULT NULL,
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX `idx_perfiles_mensajes_categoria` (`categoria`),
+  INDEX `idx_perfiles_mensajes_activo` (`activo`),
+  INDEX `idx_perfiles_mensajes_deleted_at` (`deleted_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT IGNORE INTO `perfiles_mensajes` (`id`, `titulo`, `categoria`, `descripcion`, `contenido`, `activo`) VALUES
+  (1, 'Bienvenida', 'Bienvenida', 'Enviar tras el registro o primer contacto con el cliente', '¡Hola {nombre}! 👋 Te damos una cordial bienvenida a NETZ. Estamos a tu disposición para ayudarte con todo lo que necesites.', 1),
+  (2, 'Saludo Inicial', 'Saludo', 'Saludo diario para iniciar conversación comercial', '¡Hola {nombre}! Espero que tengas un excelente día. ¿En qué podemos colaborarte hoy?', 1),
+  (3, 'Recordatorio de Pedido', 'Recordatorio', 'Notificar que el pedido está listo para entrega o retiro', 'Estimado/a {nombre}, le informamos que su pedido se encuentra listo para entrega / retiro. Por favor confírmenos su disponibilidad.', 1),
+  (4, 'Agradecimiento', 'General', 'Agradecer la preferencia tras finalizar la atención o entrega', '¡Muchas gracias por tu preferencia, {nombre}! Nos alegra atenderte. Que tengas un excelente día. ✨', 1);
