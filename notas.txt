@@ -1,0 +1,203 @@
+Conversation Log
+podes darme un analisis de cada modulo existe bien detallado, en especial el modulo de Configuracion y maximo foco a la pestaña de Presupuesto ya que esa configuracion de presupuesto quiero llevar a otro proyecto, la idea es para pasarle el promt para el desarrollo
+
+Estoy analizando todos los archivos del proyecto (tanto frontend como backend y base de datos) mediante el subagente de investigación, poniendo foco especial en el módulo de Configuración y la pestaña de Presupuesto. Enseguida te comparto el desglose completo y el prompt listo para llevar a tu otro proyecto.
+
+Aquí tienes el análisis completo y detallado de todos los módulos del sistema, seguido de un desglose exhaustivo del módulo de Configuración (con máximo foco en la pestaña de Presupuesto) y, al final, un Prompt técnico listo para copiar y pegar en tu otro proyecto para replicar exactamente el diseñador y motor de presupuestos.
+
+1. Análisis Detallado de Cada Módulo Existente
+
+El sistema está construido con Go (net/http + go-chi/chi/v5) + MySQL en el backend (main.go) y JavaScript ES2022 Vanilla + Tailwind CSS en el frontend (app.js).
+
+1.1 Autenticación, Seguridad y Temporizador de Inactividad
+Archivos: jwt.go, middleware.go, auth.go, login.js, api.js, session-timer.js.
+Tablas BD: users, roles (admin, editor, viewer).
+Cómo funciona:
+Autenticación por cookies HttpOnly (access_token de 60 min y refresh_token de 7 días), contraseñas con bcrypt y rate-limiting en login (10 intentos/min por IP).
+Permisos granulares por módulo: Cada usuario tiene una columna modulos (JSON array) que define a qué secciones del menú puede acceder (dashboard, pedidos, presupuestos, clientes, productos, mensajes, sessions, broadcast, configuracion). El usuario ID 1 (JustoL) tiene protección de SuperAdmin.
+Auto-cierre por inactividad: session-timer.js monitorea actividad de mouse/teclado/touch según el tiempo configurado por cada usuario (session_timeout_minutes).
+1.2 Dashboard / Panel General (#/dashboard)
+Archivos: dashboard.js, stats.go, pedidos.go.
+Endpoints: GET /api/stats, GET /api/pedidos/resumen-financiero, GET /api/pedidos/promesas-pago, GET /api/pedidos.
+Cómo funciona:
+Muestra un Panel de Resumen Financiero colapsable con filtros por período (Hoy, Esta Semana, Este Mes, Este Año), KPIs (Total Vendido, Cobrado Real, Cuentas por Cobrar, Ticket Promedio), gráficos SVG de evolución (últimos 30 días y 12 meses) y alertas de Promesas de Pago vencidas o del día.
+Debajo integra la gestión rápida y tabla de Pedidos en curso.
+1.3 Pedidos (#/pedidos)
+Archivos: pedidos.js, pedidos-api.js, pedidos.go, pedido.go.
+Tablas BD: pedidos, pedido_items, pedido_pagos.
+Cómo funciona:
+Numeración automática (PED-0001). Puede crearse manualmente mediante un Wizard de 3 pasos (1. Cliente y Entrega, 2. Ítems/Productos y Descuento, 3. Seña/Pago Inicial) o generarse automáticamente al aprobar un Presupuesto.
+Flujo de estados de producción: creado -> en produccion -> en pausa -> listo -> cancelado (gobernado por las reglas de Configuración > Pedidos).
+Control financiero y cobros parciales: Registra múltiples pagos (pedido_pagos por Efectivo, Transferencia, QR, Tarjeta), recalcula automáticamente monto_abonado, saldo_pendiente y estado_pago (pendiente, señado, pagado), y permite agendar Promesas de Pago (fecha_promesa_pago, monto_promesa_pago, nota_promesa_pago).
+1.4 Presupuestos (#/presupuestos, #/presupuestos/nuevo, #/presupuestos/editar)
+Archivos: presupuestos.js, presupuesto-form.js, presupuestos-service.js, presupuestos.go, presupuesto.go.
+Tablas BD: presupuestos, presupuesto_items.
+Cómo funciona:
+Numeración automática (PRE-0001). Estados: borrador, enviado, aprobado, rechazado, vencido.
+Editor a pantalla completa con vista previa A4 en vivo (presupuesto-form.js): Dividido en panel de edición a la izquierda (3 pasos: Datos e Ítems, Condiciones y Cuadro de Descuento, Galería de Fotos Hoja 3) y previsualización A4 interactiva en tiempo real a la derecha.
+Motor PDF de alta fidelidad (Microsoft Edge Headless): El backend genera un documento HTML A4 de 3+ hojas con imágenes locales embebidas en Base64 (data:image/...) y lo compila a PDF nativo usando msedge.exe --headless=new --print-to-pdf.
+Envío directo de PDF por WhatsApp: Compila el PDF al vuelo y lo envía como documento adjunto vía el gateway de WhatsApp usando la plantilla configurada.
+Conversión automática a Pedido: Al cambiar el estado a aprobado, el backend crea dentro de la misma transacción SQL el registro en pedidos y sus pedido_items, vinculando pedido_id.
+1.5 Clientes (#/clientes)
+Archivos: clientes.js, cliente-form-page.js, cliente-form.js, clientes.go.
+Tablas BD: clientes, cliente_historial.
+Cómo funciona:
+Soporta Persona Física y Empresa (Persona Jurídica) con cálculo automático de Dígito Verificador (DV Módulo 11 de Paraguay) para el RUC, geolocalización (ubicacion_url), contacto comercial y guardado automático de borradores en localStorage.
+Historial de auditoría campo por campo (cliente_historial): Registra exactamente qué campo cambió, su valor anterior, valor nuevo, usuario y fecha.
+1.6 Productos y Catálogo (#/productos)
+Archivos: productos.js, producto-form.js, productos-api.js, productos.go.
+Tablas BD: productos, categorias, marcas, unidades_medida.
+Cómo funciona:
+Gestión de SKU (PRD-XXXXXX), código de barras, costos, precio minorista/mayorista con calculadora de margen en Guaraníes (PYG), IVA (10%, 5%, Exenta), control de stock actual/mínimo y galería de hasta 5 fotos comprimidas automáticamente en el navegador a WebP (imagen principal 1200px + miniatura 300px) mediante image-uploader.js y gallery-uploader.js.
+1.7 Perfiles de Mensajes (#/mensajes), Sesiones (#/sessions) y Difusión (#/broadcast)
+Archivos: mensajes.js, sessions.js, broadcast.js, scheduled-manager.js, whatsapp.go, scheduled.go.
+Tablas BD: plantillas_mensajes, broadcast_history, scheduled_messages.
+Cómo funciona:
+Perfiles de Mensajes: Plantillas reutilizables con variables dinámicas ({nombre}, {telefono}, {documento}, {ciudad}, {empresa}, {productos}) y vista previa tipo burbuja de WhatsApp.
+Difusión y Mensajes: Envío individual inmediato, campañas masivas con worker anti-bloqueo (pausas aleatorias configurables en segundo plano) y mensajes programados (scheduled_messages evaluados cada 3 segundos por un worker en Go y con contador regresivo en la barra superior).
+1.8 Usuarios (#/users)
+Archivos: users.js, users.go.
+Cómo funciona: CRUD exclusivo para administradores donde se asigna el rol (admin, editor, viewer) y se marcan con switches los módulos exactos a los que tiene acceso cada usuario.
+2. Análisis Profundo del Módulo de Configuración (#/configuracion)
+Archivos clave:
+Frontend: configuracion.js (5.495 líneas), config-service.js, config-productos.js, config-logs.js.
+Backend: configuracion.go (784 líneas), logs.go.
+Arquitectura de Persistencia: Utiliza una tabla clave-valor en MySQL llamada configuraciones (clave VARCHAR(100) PK, valor LONGTEXT, updated_by, updated_at), donde cada pestaña guarda un documento JSON validado y sanitizado por Go:
+Pestaña en UI	Clave en tabla configuraciones	Endpoint API	Qué configura
+1. WhatsApp	whatsapp_ajustes	GET/PUT /api/configuracion/whatsapp	Formato de la variable {nombre} (incluir nombre, incluir apellido) y textos de plantillas rápidas para pedidos.
+2. Pedidos	pedidos_ajustes	GET/PUT /api/configuracion/pedidos	Reglas de negocio (permitirRetrocederEstado, permitirCancelarEnProduccion, requerirPagoTotalParaListo), modo de envío de WhatsApp al marcar pedido como listo (confirmar, automatico, no_enviar), plantillaListoId y plantillaPresupuestoId (plantilla usada al enviar un PDF de Presupuesto por WhatsApp).
+3. Productos	(Tablas propias)	/api/categorias, /api/marcas, /api/unidades-medida	Sub-pestañas con DataTable para administrar Categorías, Marcas y Unidades de Medida (incluyendo si permiten decimales).
+4. Presupuesto	presupuesto_config	GET/PUT /api/configuracion/presupuesto	Diseñador visual de las 3 hojas A4 del Presupuesto, colores, logos, escalas, cuadro de promoción, términos y condiciones enriquecidos, pie de página y grilla de fotos.
+5. Perfil	(Tabla users)	PUT /api/auth/profile, POST /api/auth/avatar	Foto de perfil (WebP), nombre, correo, contraseña y tiempo de auto-cierre de sesión por inactividad (sessionTimeoutMinutes).
+6. General	empresa_datos	GET/PUT /api/configuracion/empresa, POST /api/configuracion/empresa/logo	Datos corporativos que alimentan directamente al Presupuesto: Razón social, RUC, Eslogan, Rubro, Logo corporativo (/uploads/empresa/...), lista dinámica de teléfonos, email, dirección, ciudad y redes sociales (facebook, instagram, tiktok, website).
+7. Logs	(Tabla activity_logs)	GET /api/configuracion/logs	(Solo Admin) Visor de auditoría del sistema con filtros por módulo, acción, usuario, fechas y modal de detalle JSON.
+3. Foco Máximo: Pestaña de Presupuesto en Configuración
+
+La pestaña Presupuesto dentro de configuracion.js (junto con los datos corporativos de la pestaña General) funciona como un Estudio de Diseño de Documentos A4 en Tiempo Real.
+
+3.1 Estructura del Documento que Configura (3 Hojas A4 de 210mm × 297mm)
+Hoja 1 — Portada Corporativa (Portada):
+Fondo a sangre completa (210mm × 297mm) con el color corporativo elegido (colorPortada).
+Cálculo automático de luminancia para decidir si el texto/bordes sobre la portada van en blanco o en oscuro.
+Logo de la empresa centrado (tamaño regulable en milímetros logoPortadaAncho de 40mm a 190mm), seguido de Razón Social y Eslogan (tomados de empresa_datos).
+Hoja 2 — Detalle Comercial, Totales y Condiciones (Presupuesto):
+Cabecera: Logo opcional (mostrarLogoPagina2) con altura regulable (logoPagina2Alto de 10mm a 90mm) + barra de título coloreada (mostrarTitulo, titulo: "PRESUPUESTO OFICIAL").
+Bloque de metadatos: Datos del cliente a la izquierda y N° de presupuesto, fecha de emisión y validez (validezDias) a la derecha.
+Tabla de Ítems: Con opción de mostrar u ocultar la miniatura de foto de cada producto (mostrarFotoProducto).
+Sección inferior dividida:
+A la izquierda: Cuadro Destacado de Descuento / Promoción (descuentoBox), con interruptor general (habilitado), interruptor de recuadro/borde (mostrarCuadro), texto promocional y 3 selectores de color (colorFondo, colorTexto, colorBorde) más temas predefinidos.
+A la derecha: Resumen numérico (Subtotal, Descuento, Total Final resaltado con colorPortada).
+Términos y Condiciones: Título personalizable (terminosTitulo) + contenido HTML enriquecido (terminosCondiciones) con editor WYSIWYG (negrita, cursiva, subrayado, tamaño de letra, alineación, listas y etiqueta dinámica {validez_dias}).
+Controles de ajuste fino de paginación (CSS Variables en vivo):
+escalaTextoPagina2 (50% a 120% -> --p2-font-scale): Escala proporcionalmente todos los textos, paddings y miniaturas de la Hoja 2.
+espaciadoBloquesPagina2 (6px a 60px -> --p2-block-gap): Separa o junta verticalmente las secciones de la Hoja 2.
+terminosYPagina2 (0px a 350px -> --p2-terminos-y): Empuja hacia abajo el bloque de Términos y Condiciones.
+Pie de página (footer): Nota de agradecimiento en cursiva (notaAgradecimiento) + barra inferior en colorPortada con íconos SVG vectoriales para Redes Sociales (facebook, instagram, tiktok, website), Teléfonos (mostrarTelefonos) y Dirección (mostrarDireccion), alimentados desde Configuración > General.
+Hoja 3 (y siguientes) — Galería de Fotos de Productos (paginaFotos):
+Interruptor general (habilitado) para incluir o no la hoja de anexos fotográficos.
+Barra de título opcional (mostrarTitulo, titulo: "FOTOS DE PRODUCTOS").
+Controles geométricos en tiempo real:
+fotoTamanoMm (30mm a 150mm): Tamaño de las tarjetas de foto.
+posicionX (-150px a 150px) y posicionY (0px a 200px): Desplazamiento X/Y del bloque de fotos en la hoja.
+separacionPx (4px a 64px): Espacio (gap) entre tarjetas de fotos.
+ajusteFoto ("contain" para ver el producto completo sin recortar, o "cover" para llenar el recuadro).
+mostrarNombre (bool): Muestra u oculta el pie de foto con el nombre del producto debajo de cada imagen.
+Misma barra de pie de página corporativo que la Hoja 2.
+3.2 Cómo interactúa la Configuración Global con cada Presupuesto Individual
+Cuando el usuario crea un presupuesto nuevo en presupuesto-form.js, el formulario hereda por defecto los valores de presupuesto_config (validezDias, terminosCondiciones, descuentoBox, paginaFotos.habilitado).
+Sin embargo, cada presupuesto guarda en la base de datos sus propios snapshots JSON (terminos_condiciones, descuento_box_snapshot, pagina_fotos_snapshot). Esto permite:
+Modificar los términos, el texto/color del cuadro de descuento o el orden/visibilidad/grilla (2x3, 3x3, 3x4, 4x4, 5x5, 6x6) de las fotos para un presupuesto específico sin alterar la plantilla global.
+Sincronizar automáticamente el porcentaje de descuento: si en un presupuesto se aplica un 15% de descuento, el texto del descuentoBox cambia automáticamente de "¡10% DE DESCUENTO..." a "¡15% DE DESCUENTO...".
+4. Prompt Listo para Llevar a tu Otro Proyecto
+
+Puedes copiar y pegar el siguiente bloque directamente como prompt para que la IA desarrolle exactamente este sistema de Configuración de Presupuesto + Generador de Presupuestos A4 (3 hojas) con PDF nativo en tu otro proyecto:
+
+markdown
+
+Quiero implementar un sistema completo de "Configuración y Diseño de Presupuesto A4 (3 Hojas)" junto con su motor de generación de HTML/PDF y vista previa en vivo, siguiendo exactamente esta arquitectura y especificación funcional:
+
+1. Almacenamiento en Base de Datos y Backend
+
+Tabla de Configuraciones (configuraciones):
+
+Esquema clave-valor: clave VARCHAR(100) PRIMARY KEY, valor LONGTEXT NOT NULL, updated_by INT NULL, updated_at DATETIME.
+Clave empresa_datos (GET/PUT /api/configuracion/empresa y POST /api/configuracion/empresa/logo): Almacena JSON con: razonSocial, ruc, eslogan, rubro, logoUrl, telefonos (array de strings), email, direccion, ciudad, y redesSociales ({ facebook, instagram, tiktok, website }).
+Clave presupuesto_config (GET/PUT /api/configuracion/presupuesto): Almacena el JSON de diseño del presupuesto con validación y sanitización de rangos en el servidor.
+
+Estructura exacta del JSON presupuesto_config y sus valores por defecto:
+
+colorPortada: "#435A62" (Hex válido #RRGGBB. Define el color de fondo de la Hoja 1, barras de título de Hojas 2 y 3, cuadro de Total Final y barra de pie de página. Calcular luminancia automáticamente para usar texto blanco #ffffff o texto oscuro #0f172a según contraste).
+logoPortadaAncho: 140 (int en mm, rango 40 a 190).
+mostrarLogoPagina2: true (bool).
+logoPagina2Alto: 28 (int en mm, rango 10 a 90).
+mostrarTitulo: true (bool).
+titulo: "PRESUPUESTO OFICIAL" (string, máx 80 chars).
+escalaTextoPagina2: 100 (int en %, rango 50 a 120 -> mapeado a variable CSS --p2-font-scale).
+espaciadoBloquesPagina2: 20 (int en px, rango 6 a 60 -> mapeado a variable CSS --p2-block-gap).
+terminosYPagina2: 20 (int en px, rango 0 a 350 -> mapeado a variable CSS --p2-terminos-y).
+mostrarFotoProducto: true (bool, muestra miniatura de foto del producto en la tabla de ítems de la Hoja 2).
+validezDias: 15 (int en días, rango 1 a 365).
+terminosTitulo: "TÉRMINOS Y CONDICIONES" (string, máx 100 chars).
+terminosCondiciones: HTML enriquecido con los términos por defecto (soporta negrita, cursiva, subrayado, tamaños, alineación, listas y variable {validez_dias}).
+descuentoBox:
+habilitado: true (bool)
+mostrarCuadro: true (bool: si es true dibuja fondo y borde; si es false muestra solo el texto coloreado)
+texto: "¡10% DE DESCUENTO POR PAGO AL CONTADO!" (string, máx 120 chars)
+colorFondo: "#ecfdf5"
+colorTexto: "#065f46"
+colorBorde: "#a7f3d0"
+footer:
+notaAgradecimiento: "¡Muchas gracias por su preferencia!" (string, máx 150 chars)
+mostrarRedes: { facebook: true, instagram: true, tiktok: true, website: true }
+mostrarTelefonos: true
+mostrarDireccion: true
+paginaFotos (Hoja 3):
+habilitado: true (bool)
+mostrarTitulo: true (bool)
+titulo: "FOTOS DE PRODUCTOS" (string, máx 80 chars)
+fotoTamanoMm: 80 (int en mm, rango 30 a 150)
+posicionX: 0 (int en px, rango -150 a 150)
+posicionY: 20 (int en px, rango 0 a 200)
+separacionPx: 16 (int en px, rango 4 a 64)
+ajusteFoto: "contain" ("contain" | "cover")
+mostrarNombre: true (bool)
+2. Interfaz de Usuario de la Pestaña "Configuración > Presupuesto"
+
+Diseñar una vista dividida en 2 columnas (grid-cols-1 xl:grid-cols-12 gap-6 items-start):
+
+Columna Izquierda (xl:col-span-5): Controles organizados por Hoja (Hoja 1: Portada, Hoja 2: Presupuesto, Hoja 3: Fotos):
+
+Selector de hoja activa sincronizado con la vista previa.
+Controles Hoja 1: Color picker + input Hex + 6 swatches rápidos para colorPortada; slider + input numérico sincronizados para logoPortadaAncho (40–190mm); botón de acceso rápido para subir/cambiar el logo corporativo.
+Controles Hoja 2:
+Switch mostrarLogoPagina2 + slider/número logoPagina2Alto (10–90mm).
+Switch mostrarTitulo + input titulo + input validezDias.
+Sliders + inputs numéricos sincronizados para escalaTextoPagina2 (50–120%), espaciadoBloquesPagina2 (6–60px), terminosYPagina2 (0–350px) y switch mostrarFotoProducto.
+Configuración de descuentoBox: Switch habilitado, switch mostrarCuadro, input texto, 3 selectores de color (colorFondo, colorTexto, colorBorde) y botones de temas rápidos (Esmeralda, Ámbar, Violeta, Azul, Rosa).
+Editor WYSIWYG (contenteditable) para terminosCondiciones con barra de herramientas (Negrita, Cursiva, Subrayado, Tamaño de fuente, Alineación, Listas y botón para insertar {validez_dias}), más input para terminosTitulo.
+Configuración de footer: Input notaAgradecimiento y checkboxes para mostrar/ocultar Facebook, Instagram, TikTok, Website, Teléfonos y Dirección (leyendo los datos reales de empresa_datos).
+Controles Hoja 3:
+Switch paginaFotos.habilitado, switch mostrarTitulo e input titulo.
+Sliders + inputs numéricos para fotoTamanoMm (30–150mm), posicionX (-150 a 150px), posicionY (0 a 200px) y separacionPx (4 a 64px).
+Selector ajusteFoto (contain vs cover) y switch mostrarNombre.
+Pie del formulario: Botón "Restablecer valores" y botón principal "Guardar Diseño de Presupuesto".
+
+Columna Derecha (xl:col-span-7 sticky): Previsualizador A4 en Tiempo Real (0ms latencia):
+
+Renderiza las 3 hojas A4 exactas (210mm × 297mm) escaladas dinámicamente mediante ResizeObserver y transform: scale(...) para encajar en pantalla.
+Cualquier cambio en sliders, colores, textos o switches del panel izquierdo debe actualizar instantáneamente el DOM de la vista previa sin recargar.
+Permite alternar entre ver Hoja 1, Hoja 2, Hoja 3 o Vista Continua con controles de zoom.
+3. Consumo en el Módulo de Presupuestos y Generación de PDF
+Snapshots por Presupuesto:
+Al crear un presupuesto nuevo, pre-cargar validezDias, terminosCondiciones, descuentoBox y paginaFotos.habilitado desde presupuesto_config.
+Guardar en la tabla presupuestos las columnas terminos_condiciones (TEXT), descuento_box_snapshot (TEXT JSON) y pagina_fotos_snapshot (LONGTEXT JSON con { habilitado, grid: '2x3'|'3x3'|'3x4'|'4x4'|'5x5'|'6x6', fotos: [...] }) para permitir personalizar cada presupuesto individualmente sin romper la plantilla global.
+Si el presupuesto tiene un porcentaje de descuento aplicado, actualizar automáticamente el porcentaje en el texto del descuentoBox.
+Motor de Renderizado HTML/PDF A4:
+Generar un documento HTML autónomo con @page { size: A4 portrait; margin: 0; } donde cada .pdf-sheet mide exactamente 210mm × 297mm.
+Convertir imágenes locales (logo y fotos de productos) a data:image/...;base64 en el servidor antes de compilar el PDF para evitar imágenes rotas.
+Si la Hoja 3 tiene más fotos de las que caben en la grilla elegida (ej. más de 6 fotos en grilla 2x3 o más de 9 en 3x3), paginar automáticamente generando múltiples hojas A4 de galería (FOTOS DE PRODUCTOS (1/2), (2/2), etc.).
+Compilar a PDF usando Chromium/Edge Headless (--headless=new --disable-gpu --no-sandbox --no-pdf-header-footer --print-to-pdf).
+
+¿Quieres que profundice en alguna parte específica del código (por ejemplo, el HTML/CSS exacto del generador A4 de las 3 hojas en presupuestos.go o la lógica de grillas de fotos en presupuesto-form.js) para anexarlo también al prompt?
+
+Antigravity

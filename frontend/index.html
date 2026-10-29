@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>NETZ — Panel de Control R1</title>
+
+    <!-- Prevención de parpadeo (FOUC) de modo claro/oscuro antes del primer render (AGENTS.md Sección 7) -->
+    <script>
+      (function () {
+        try {
+          var stored = localStorage.getItem('theme');
+          var prefersDark =
+            window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+          if (stored === 'dark' || (!stored && prefersDark)) {
+            document.documentElement.classList.add('dark');
+          } else {
+            document.documentElement.classList.remove('dark');
+          }
+        } catch (_) {}
+      })();
+    </script>
+
+    <!-- Font Awesome 6 (obligatorio, sin emojis) -->
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css"
+      crossorigin="anonymous"
+      referrerpolicy="no-referrer"
+    />
+
+    <!-- Tailwind CSS con los tokens exactos de AGENTS.md Sección 3 -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        darkMode: 'class',
+        theme: {
+          extend: {
+            colors: {
+              brand: {
+                DEFAULT: '#a37cfc',
+                hover: '#8f63f5',
+                active: '#7c4de8',
+                soft: '#efe8ff',
+              },
+              danger: {
+                DEFAULT: '#dc2626',
+                hover: '#b91c1c',
+              },
+            },
+          },
+        },
+      };
+    </script>
+    <style type="text/tailwindcss">
+      @layer components {
+        .app-module-area {
+          @apply flex-1 w-full h-full min-h-0 overflow-y-auto bg-slate-50/70 dark:bg-slate-950 transition-colors duration-200;
+        }
+      }
+    </style>
+  </head>
+  <body class="bg-[#f8fafc] dark:bg-slate-950 text-slate-900 dark:text-slate-100 antialiased selection:bg-brand selection:text-white">
+    <div id="app"></div>
+
+    <!-- Flashy.js obligatorio para notificaciones -->
+    <script src="./src/vendor/flashy.js"></script>
+    <!-- Aplicación principal ES2022 Modules -->
+    <script type="module" src="./src/app.js"></script>
+  </body>
+</html>
+

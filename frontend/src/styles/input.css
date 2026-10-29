@@ -1,0 +1,10 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer components {
+  .app-module-area {
+    @apply flex-1 w-full h-full min-h-0 overflow-y-auto bg-slate-50/70 dark:bg-slate-950 transition-colors duration-200;
+  }
+}
+

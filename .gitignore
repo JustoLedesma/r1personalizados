@@ -1,0 +1,16 @@
+# Variables de entorno (nunca versionar credenciales reales)
+.env
+backend/.env
+
+# Dependencias y binarios
+node_modules/
+frontend/node_modules/
+backend/server.exe
+backend/server
+*.exe
+*.log
+
+# Archivos temporales del sistema
+.DS_Store
+Thumbs.db
+
