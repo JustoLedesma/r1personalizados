@@ -45,7 +45,7 @@ func (h *ClientesHandler) HandleItem(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPut:
 		h.Update(w, r, id)
 	case http.MethodDelete:
-		h.Delete(w, r, id)
+		h.SoftDelete(w, r, id)
 	default:
 		auth.WriteJSONError(w, http.StatusMethodNotAllowed, "método no permitido")
 	}
@@ -65,6 +65,7 @@ func (h *ClientesHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
 	tipo := strings.TrimSpace(r.URL.Query().Get("tipo"))
+	estado := strings.TrimSpace(r.URL.Query().Get("estado"))
 	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
 	if page < 1 {
 		page = 1
@@ -75,11 +76,17 @@ func (h *ClientesHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 	offset := (page - 1) * pageSize
 
-	where := "WHERE 1=1"
+	// Solo clientes no enviados a Reciclaje
+	where := "WHERE deleted_at IS NULL"
 	var args []any
 	if tipo == "persona_fisica" || tipo == "empresa" {
 		where += " AND tipo_cliente = ?"
 		args = append(args, tipo)
+	}
+	if estado == "activo" {
+		where += " AND activo = 1"
+	} else if estado == "inactivo" {
+		where += " AND activo = 0"
 	}
 	if q != "" {
 		like := "%" + q + "%"
@@ -94,7 +101,7 @@ func (h *ClientesHandler) List(w http.ResponseWriter, r *http.Request) {
 	var total int
 	countQuery := "SELECT COUNT(*) FROM clientes " + where
 	if err := h.DB.QueryRowContext(r.Context(), countQuery, args...).Scan(&total); err != nil {
-		auth.WriteJSONError(w, http.StatusInternalServerError, "error al consultar total de clientes: "+err.Error())
+		auth.WriteJSONError(w, http.StatusInternalServerError, "La tabla 'clientes' aún no existe en la base de datos. Ejecuta el SQL de creación en phpMyAdmin.")
 		return
 	}
 
@@ -109,7 +116,7 @@ func (h *ClientesHandler) List(w http.ResponseWriter, r *http.Request) {
 			COALESCE(telefono_codigo,'+595'), COALESCE(telefono_numero,''), COALESCE(telefono_completo,''),
 			COALESCE(email,''), COALESCE(direccion,''), COALESCE(departamento,''),
 			COALESCE(ciudad,''), COALESCE(barrio,''), COALESCE(referencia,''),
-			created_at, updated_at
+			COALESCE(activo, 1), created_at, updated_at
 		FROM clientes
 		` + where + `
 		ORDER BY id DESC
@@ -126,6 +133,7 @@ func (h *ClientesHandler) List(w http.ResponseWriter, r *http.Request) {
 	clientes := make([]models.Cliente, 0)
 	for rows.Next() {
 		var c models.Cliente
+		var activoInt int
 		if err := rows.Scan(
 			&c.ID, &c.TipoCliente, &c.TipoDocumento, &c.NumeroDocumento,
 			&c.Nombres, &c.Apellidos, &c.FechaNacimiento,
@@ -136,11 +144,12 @@ func (h *ClientesHandler) List(w http.ResponseWriter, r *http.Request) {
 			&c.TelefonoCodigo, &c.TelefonoNumero, &c.TelefonoCompleto,
 			&c.Email, &c.Direccion, &c.Departamento,
 			&c.Ciudad, &c.Barrio, &c.Referencia,
-			&c.CreatedAt, &c.UpdatedAt,
+			&activoInt, &c.CreatedAt, &c.UpdatedAt,
 		); err != nil {
 			auth.WriteJSONError(w, http.StatusInternalServerError, "error leyendo registro de cliente")
 			return
 		}
+		c.Activo = activoInt == 1
 		clientes = append(clientes, c)
 	}
 
@@ -160,6 +169,7 @@ func (h *ClientesHandler) GetByID(w http.ResponseWriter, r *http.Request, id int
 	}
 
 	var c models.Cliente
+	var activoInt int
 	err := h.DB.QueryRowContext(r.Context(), `
 		SELECT
 			id, tipo_cliente, COALESCE(tipo_documento,''), COALESCE(numero_documento,''),
@@ -171,9 +181,9 @@ func (h *ClientesHandler) GetByID(w http.ResponseWriter, r *http.Request, id int
 			COALESCE(telefono_codigo,'+595'), COALESCE(telefono_numero,''), COALESCE(telefono_completo,''),
 			COALESCE(email,''), COALESCE(direccion,''), COALESCE(departamento,''),
 			COALESCE(ciudad,''), COALESCE(barrio,''), COALESCE(referencia,''),
-			created_at, updated_at
+			COALESCE(activo, 1), created_at, updated_at
 		FROM clientes
-		WHERE id = ?
+		WHERE id = ? AND deleted_at IS NULL
 	`, id).Scan(
 		&c.ID, &c.TipoCliente, &c.TipoDocumento, &c.NumeroDocumento,
 		&c.Nombres, &c.Apellidos, &c.FechaNacimiento,
@@ -184,7 +194,7 @@ func (h *ClientesHandler) GetByID(w http.ResponseWriter, r *http.Request, id int
 		&c.TelefonoCodigo, &c.TelefonoNumero, &c.TelefonoCompleto,
 		&c.Email, &c.Direccion, &c.Departamento,
 		&c.Ciudad, &c.Barrio, &c.Referencia,
-		&c.CreatedAt, &c.UpdatedAt,
+		&activoInt, &c.CreatedAt, &c.UpdatedAt,
 	)
 	if err == sql.ErrNoRows {
 		auth.WriteJSONError(w, http.StatusNotFound, "cliente no encontrado")
@@ -194,6 +204,7 @@ func (h *ClientesHandler) GetByID(w http.ResponseWriter, r *http.Request, id int
 		auth.WriteJSONError(w, http.StatusInternalServerError, "error al obtener cliente")
 		return
 	}
+	c.Activo = activoInt == 1
 
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	_ = json.NewEncoder(w).Encode(c)
@@ -306,7 +317,7 @@ func (h *ClientesHandler) Create(w http.ResponseWriter, r *http.Request) {
 			representante_nombre, representante_documento, persona_contacto,
 			whatsapp_codigo, whatsapp_numero, whatsapp_completo,
 			telefono_codigo, telefono_numero, telefono_completo,
-			email, direccion, departamento, ciudad, barrio, referencia
+			email, direccion, departamento, ciudad, barrio, referencia, activo
 		) VALUES (
 			?, ?, ?,
 			?, ?, ?, ?, ?,
@@ -314,7 +325,7 @@ func (h *ClientesHandler) Create(w http.ResponseWriter, r *http.Request) {
 			?, ?, ?,
 			?, ?, ?,
 			?, ?, ?,
-			?, ?, ?, ?, ?, ?
+			?, ?, ?, ?, ?, ?, 1
 		)
 	`,
 		c.TipoCliente, nullString(c.TipoDocumento), nullString(c.NumeroDocumento),
@@ -332,6 +343,7 @@ func (h *ClientesHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	id, _ := res.LastInsertId()
 	c.ID = int(id)
+	c.Activo = true
 
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(http.StatusCreated)
@@ -364,7 +376,7 @@ func (h *ClientesHandler) Update(w http.ResponseWriter, r *http.Request, id int)
 			whatsapp_codigo = ?, whatsapp_numero = ?, whatsapp_completo = ?,
 			telefono_codigo = ?, telefono_numero = ?, telefono_completo = ?,
 			email = ?, direccion = ?, departamento = ?, ciudad = ?, barrio = ?, referencia = ?
-		WHERE id = ?
+		WHERE id = ? AND deleted_at IS NULL
 	`,
 		c.TipoCliente, nullString(c.TipoDocumento), nullString(c.NumeroDocumento),
 		nullString(c.Nombres), nullString(c.Apellidos), nullString(c.FechaNacimiento), nullString(c.Sexo), nullString(c.Nacionalidad),
@@ -385,19 +397,25 @@ func (h *ClientesHandler) Update(w http.ResponseWriter, r *http.Request, id int)
 	_ = json.NewEncoder(w).Encode(c)
 }
 
-func (h *ClientesHandler) Delete(w http.ResponseWriter, r *http.Request, id int) {
+// SoftDelete simula el borrado (AGENTS.md: nada del sistema se debe borrar físicamente;
+// se oculta de la vista, registra fecha, hora y usuario que borró, y pasa al módulo de Reciclaje).
+func (h *ClientesHandler) SoftDelete(w http.ResponseWriter, r *http.Request, id int) {
 	if h.DB == nil {
 		auth.WriteJSONError(w, http.StatusServiceUnavailable, "base de datos no conectada")
 		return
 	}
 
-	_, err := h.DB.ExecContext(r.Context(), "DELETE FROM clientes WHERE id = ?", id)
+	deletedBy := auth.CurrentActorName(r)
+	_, err := h.DB.ExecContext(
+		r.Context(),
+		"UPDATE clientes SET deleted_at = NOW(), deleted_by = ? WHERE id = ?",
+		deletedBy, id,
+	)
 	if err != nil {
-		auth.WriteJSONError(w, http.StatusInternalServerError, "error al eliminar el cliente")
+		auth.WriteJSONError(w, http.StatusInternalServerError, "error al enviar el cliente a reciclaje")
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	_ = json.NewEncoder(w).Encode(map[string]string{"message": "cliente eliminado"})
+	_ = json.NewEncoder(w).Encode(map[string]string{"message": "cliente enviado a reciclaje"})
 }
-

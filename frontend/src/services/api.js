@@ -1,5 +1,16 @@
 import { toast } from '../components/toast.js';
 
+function getActiveUserHeader() {
+  try {
+    const raw = sessionStorage.getItem('r1_session_user');
+    if (!raw) return 'Operador Ventas';
+    const u = JSON.parse(raw);
+    return u.fullName || u.username || u.email || 'Operador Ventas';
+  } catch (_) {
+    return 'Operador Ventas';
+  }
+}
+
 /**
  * Servicio centralizado de peticiones HTTP (AGENTS.md Sección 9)
  * - Usa credentials: 'include' para cookies HttpOnly
@@ -12,6 +23,7 @@ export async function apiFetch(endpoint, options = {}, isRetry = false) {
     credentials: 'include',
     headers: {
       'Content-Type': 'application/json',
+      'X-User-Name': getActiveUserHeader(),
       ...(options.headers || {}),
     },
     ...options,
@@ -46,4 +58,3 @@ export async function apiFetch(endpoint, options = {}, isRetry = false) {
   }
   return data;
 }
-

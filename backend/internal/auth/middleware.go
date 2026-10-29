@@ -4,11 +4,38 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 )
 
 type ctxKey string
 
 const UserClaimsKey ctxKey = "user_claims"
+
+// CurrentActorName obtiene el nombre del usuario autenticado desde el JWT o cabecera de sesión.
+func CurrentActorName(r *http.Request) string {
+	if claims, ok := r.Context().Value(UserClaimsKey).(*Claims); ok && claims != nil {
+		if claims.FullName != "" {
+			return claims.FullName
+		}
+		if claims.Username != "" {
+			return claims.Username
+		}
+	}
+	if cookie, err := r.Cookie("access_token"); err == nil && cookie.Value != "" {
+		if claims, parseErr := ParseToken(cookie.Value, "access"); parseErr == nil && claims != nil {
+			if claims.FullName != "" {
+				return claims.FullName
+			}
+			if claims.Username != "" {
+				return claims.Username
+			}
+		}
+	}
+	if hdr := strings.TrimSpace(r.Header.Get("X-User-Name")); hdr != "" {
+		return hdr
+	}
+	return "Operador Ventas"
+}
 
 func WriteJSONError(w http.ResponseWriter, status int, msg string) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")

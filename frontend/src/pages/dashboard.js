@@ -3,6 +3,8 @@ import { createThemeToggle, getBrandLogoUrl } from '../components/theme.js';
 import { toast } from '../components/toast.js';
 import { apiFetch } from '../services/api.js';
 import { renderClientesModule } from './clientes.js';
+import { renderProveedoresModule } from './proveedores.js';
+import { renderReciclajeModule } from './reciclaje.js';
 
 export const MENU_MODULES = [
   { id: 'dashboard', label: 'Panel General', icon: 'fa-solid fa-table-cells-large', roles: ['admin', 'editor', 'viewer'] },
@@ -16,6 +18,7 @@ export const MENU_MODULES = [
   { id: 'sessions', label: 'Sesiones WhatsApp', icon: 'fa-solid fa-mobile-screen', roles: ['admin', 'editor'] },
   { id: 'broadcast', label: 'Difusión y Mensajes', icon: 'fa-solid fa-bullhorn', roles: ['admin', 'editor'] },
   { id: 'users', label: 'Usuarios y Roles', icon: 'fa-solid fa-user-group', roles: ['admin'] },
+  { id: 'reciclaje', label: 'Reciclaje', icon: 'fa-solid fa-recycle', roles: ['admin'] },
   { id: 'configuracion', label: 'Configuración', icon: 'fa-solid fa-gear', roles: ['admin'] },
 ];
 
@@ -236,6 +239,10 @@ export function renderDashboardLayout(container, { user, activeModule = 'dashboa
 
   if (currentMod.id === 'clientes') {
     renderClientesModule(mainArea);
+  } else if (currentMod.id === 'proveedor') {
+    renderProveedoresModule(mainArea);
+  } else if (currentMod.id === 'reciclaje') {
+    renderReciclajeModule(mainArea);
   }
 
   contentCol.append(header, mainArea);

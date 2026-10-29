@@ -21,7 +21,8 @@ Eres un desarrollador senior full-stack. Este documento es la fuente de verdad: 
 - **Prohibición de herramientas:** Está estrictamente prohibido utilizar, sugerir o generar archivos para frameworks de migración (como golang-migrate) o funciones de auto-migración de ORMs.
 - **Entrega de código:** El código SQL debe entregarse en bloques de texto limpios y directos, listos para que el usuario los copie y pegue en la consola de comandos de MySQL/MariaDB.
 - **Historial (Opcional):** Cuando se generen cambios estructurales, sugiere al usuario guardar la sentencia SQL en un archivo centralizado (ej. `/backend/db/schema_updates.sql`) para mantener un registro manual de los cambios en el repositorio.
-- **Borrado de datos desde el sistema** Nada del sistema se debe borrar, cuando se hace click en un icono oboton para borrar debe pedir confirmacion y solo simular el borrado, luego debe ocultar de esa vista, y debajo de Usuario y Roles crear un modulo de Reciclaje que ahi debe aparecer todos los archivos o datos borrados
+- **Borrado de datos desde el sistema** Nada del sistema se debe borrar, cuando se hace click en un icono oboton para borrar debe pedir confirmacion y solo simular el borrado, luego debe ocultar de esa vista, y debajo de Usuario y Roles crear un modulo de Reciclaje que ahi debe aparecer todos los archivos o datos borrados, y si algo fue borrado debe tomar la fecha del borrado y la hora del archivo borrado, al igual que el usuario que borro el archivo o documento
+- **Tablas y vista previa** Todos los modulos que tengan vista previa de tabla, tienen que tener la opcion de ver, editar, borrar deben tener fecha creada, fecha modificada y si se hace click por el RUC o Documento o nombre del producto o id debe abrir la vista previa del item
 
 - No agregues dependencias nuevas sin justificarlas en una línea.
 

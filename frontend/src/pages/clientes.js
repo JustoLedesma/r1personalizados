@@ -46,9 +46,38 @@ function createSectionHeader(iconClass, titleText) {
   return header;
 }
 
+function formatDateTimeFull(isoStr) {
+  if (!isoStr) return '-';
+  const d = new Date(isoStr);
+  if (Number.isNaN(d.getTime())) return String(isoStr);
+  const fecha = d.toLocaleDateString('es-PY', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  });
+  const hora = d.toLocaleTimeString('es-PY', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  });
+  return `${fecha} a las ${hora}`;
+}
+
+function formatDateOnly(dateStr) {
+  if (!dateStr) return '-';
+  const parts = String(dateStr).split('-');
+  if (parts.length === 3) {
+    return `${parts[2]}/${parts[1]}/${parts[0]}`;
+  }
+  return dateStr;
+}
+
 export function renderClientesModule(container, { subRoute = 'lista' } = {}) {
   let currentView = subRoute === 'nuevo' ? 'form' : 'lista';
   let editingCliente = null;
+  let viewingCliente = null;
+
   const listState = {
     data: [],
     total: 0,
@@ -61,6 +90,12 @@ export function renderClientesModule(container, { subRoute = 'lista' } = {}) {
     error: '',
   };
 
+  function openDetailView(cliente) {
+    viewingCliente = cliente;
+    currentView = 'detalle';
+    render();
+  }
+
   async function fetchClientes() {
     listState.loading = true;
     listState.error = '';
@@ -72,6 +107,7 @@ export function renderClientesModule(container, { subRoute = 'lista' } = {}) {
       });
       if (listState.q) params.set('q', listState.q);
       if (listState.tipo) params.set('tipo', listState.tipo);
+      if (listState.estado) params.set('estado', listState.estado);
       const res = await apiFetch(`/api/clientes?${params.toString()}`);
       listState.data = Array.isArray(res.data) ? res.data : [];
       listState.total = Number(res.total || 0);
@@ -90,7 +126,7 @@ export function renderClientesModule(container, { subRoute = 'lista' } = {}) {
     const wrapper = document.createElement('div');
     wrapper.className = 'w-full space-y-4';
 
-    // Barra superior con botón "+ Crear cliente" a la derecha (idéntico a Foto 1)
+    // Barra superior con botón "+ Crear cliente" a la derecha
     const topBar = document.createElement('div');
     topBar.className = 'flex items-center justify-end';
 
@@ -109,7 +145,7 @@ export function renderClientesModule(container, { subRoute = 'lista' } = {}) {
     topBar.appendChild(newBtn);
     wrapper.appendChild(topBar);
 
-    // Barra de filtros: Tipo y Estado (idéntico a Foto 1)
+    // Barra de filtros: Tipo y Estado
     const filterBar = document.createElement('div');
     filterBar.className =
       'w-full bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-xl px-4 py-3 flex flex-wrap items-center gap-4 shadow-xs';
@@ -166,7 +202,7 @@ export function renderClientesModule(container, { subRoute = 'lista' } = {}) {
     estadoSelect.addEventListener('change', (e) => {
       listState.estado = e.target.value;
       listState.page = 1;
-      render();
+      fetchClientes();
     });
     estadoGroup.append(estadoLabel, estadoSelect);
 
@@ -211,11 +247,28 @@ export function renderClientesModule(container, { subRoute = 'lista' } = {}) {
           key: 'documento',
           label: 'DOCUMENTO',
           render: (row) => {
-            if (row.tipoCliente === 'empresa') {
-              return `<span class="text-xs font-medium">${row.rucBase || row.ruc || '-'}</span>`;
+            const wrap = document.createElement('div');
+            const docText =
+              row.tipoCliente === 'empresa'
+                ? row.rucBase || row.ruc || '-'
+                : row.numeroDocumento || '-';
+
+            const linkBtn = document.createElement('button');
+            linkBtn.type = 'button';
+            linkBtn.title = 'Ver vista previa del cliente';
+            linkBtn.className =
+              'text-xs font-semibold text-slate-800 dark:text-slate-100 hover:text-brand dark:hover:text-brand hover:underline transition-colors text-left cursor-pointer focus:outline-none';
+            linkBtn.textContent = docText;
+            linkBtn.addEventListener('click', () => openDetailView(row));
+            wrap.appendChild(linkBtn);
+
+            if (row.tipoCliente !== 'empresa' && row.ruc) {
+              const rucSub = document.createElement('div');
+              rucSub.className = 'text-[11px] text-slate-400';
+              rucSub.textContent = `RUC: ${row.ruc}`;
+              wrap.appendChild(rucSub);
             }
-            const extraRuc = row.ruc ? `<div class="text-[11px] text-slate-400">RUC: ${row.ruc}</div>` : '';
-            return `<div class="text-xs font-medium">${row.numeroDocumento || '-'}${extraRuc}</div>`;
+            return wrap;
           },
         },
         {
@@ -230,10 +283,22 @@ export function renderClientesModule(container, { subRoute = 'lista' } = {}) {
                 : `${row.nombres || ''} ${row.apellidos || ''}`.trim();
             const sub =
               row.tipoCliente === 'empresa' && row.nombreFantasia ? row.nombreFantasia : '';
-            div.innerHTML = `
-              <p class="font-semibold text-slate-800 dark:text-slate-100 text-xs sm:text-sm">${mainName || '-'}</p>
-              ${sub ? `<p class="text-[11px] text-slate-400 dark:text-slate-500">${sub}</p>` : ''}
-            `;
+
+            const nameBtn = document.createElement('button');
+            nameBtn.type = 'button';
+            nameBtn.title = 'Ver vista previa del cliente';
+            nameBtn.className =
+              'font-semibold text-slate-800 dark:text-slate-100 hover:text-brand dark:hover:text-brand hover:underline text-xs sm:text-sm text-left cursor-pointer transition-colors focus:outline-none block';
+            nameBtn.textContent = mainName || '-';
+            nameBtn.addEventListener('click', () => openDetailView(row));
+            div.appendChild(nameBtn);
+
+            if (sub) {
+              const subEl = document.createElement('p');
+              subEl.className = 'text-[11px] text-slate-400 dark:text-slate-500';
+              subEl.textContent = sub;
+              div.appendChild(subEl);
+            }
             return div;
           },
         },
@@ -261,11 +326,13 @@ export function renderClientesModule(container, { subRoute = 'lista' } = {}) {
         {
           key: 'estado',
           label: 'ESTADO',
-          render: () => {
+          render: (row) => {
+            const isActivo = row.activo !== false;
             const badge = document.createElement('span');
-            badge.className =
-              'inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400';
-            badge.innerHTML = '<i class="fa-solid fa-circle text-[6px]"></i>Activo';
+            badge.className = isActivo
+              ? 'inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400'
+              : 'inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400';
+            badge.innerHTML = `<i class="fa-solid fa-circle text-[6px]"></i>${isActivo ? 'Activo' : 'Inactivo'}`;
             return badge;
           },
         },
@@ -277,6 +344,16 @@ export function renderClientesModule(container, { subRoute = 'lista' } = {}) {
             const group = document.createElement('div');
             group.className = 'inline-flex items-center justify-end gap-1.5';
 
+            // Botón Ver (vista previa de solo lectura)
+            const viewBtn = createButton({
+              variant: 'ghost',
+              size: 'sm',
+              icon: 'fa-regular fa-eye',
+              ariaLabel: 'Ver vista previa del cliente',
+              onClick: () => openDetailView(row),
+            });
+
+            // Botón Editar
             const editBtn = createButton({
               variant: 'ghost',
               size: 'sm',
@@ -289,6 +366,7 @@ export function renderClientesModule(container, { subRoute = 'lista' } = {}) {
               },
             });
 
+            // Botón Borrar (envía a Reciclaje)
             const delBtn = createButton({
               variant: 'danger',
               size: 'sm',
@@ -300,17 +378,17 @@ export function renderClientesModule(container, { subRoute = 'lista' } = {}) {
                     ? row.razonSocial
                     : `${row.nombres || ''} ${row.apellidos || ''}`.trim();
                 openConfirmModal({
-                  title: 'Eliminar cliente',
-                  message: `¿Estás seguro de que deseas eliminar a "${displayName}"? Esta acción no se puede deshacer.`,
+                  title: 'Confirmar eliminación',
+                  message: `¿Estás seguro de que deseas eliminar a "${displayName}"? El registro se ocultará de esta vista y se moverá al módulo de Reciclaje.`,
                   confirmText: 'Eliminar',
                   onConfirm: async ({ setLoading }) => {
                     setLoading(true);
                     try {
                       await apiFetch(`/api/clientes/${row.id}`, { method: 'DELETE' });
-                      toast.success('Cliente eliminado correctamente.');
+                      toast.success('Cliente movido al módulo de Reciclaje.');
                       fetchClientes();
                     } catch (err) {
-                      toast.error(err.message || 'Error al eliminar el cliente.');
+                      toast.error(err.message || 'Error al mover el cliente a Reciclaje.');
                       return false;
                     } finally {
                       setLoading(false);
@@ -320,7 +398,7 @@ export function renderClientesModule(container, { subRoute = 'lista' } = {}) {
               },
             });
 
-            group.append(editBtn, delBtn);
+            group.append(viewBtn, editBtn, delBtn);
             return group;
           },
         },
@@ -329,6 +407,217 @@ export function renderClientesModule(container, { subRoute = 'lista' } = {}) {
 
     wrapper.appendChild(table);
     container.appendChild(wrapper);
+  }
+
+  // ==========================================================================
+  // VISTA PREVIA DEL CLIENTE (Solo lectura, toma toda el área asignada)
+  // ==========================================================================
+  function renderDetailView() {
+    container.innerHTML = '';
+
+    const c = viewingCliente || {};
+    const isEmpresa = c.tipoCliente === 'empresa';
+    const displayName = isEmpresa
+      ? c.razonSocial || 'Empresa sin nombre'
+      : `${c.nombres || ''} ${c.apellidos || ''}`.trim() || 'Cliente';
+
+    const pageWrap = document.createElement('div');
+    pageWrap.className = 'w-full space-y-5 pb-10';
+
+    // Breadcrumb + barra superior
+    const topHeader = document.createElement('div');
+    topHeader.className = 'space-y-2';
+
+    const breadcrumb = document.createElement('div');
+    breadcrumb.className = 'flex items-center gap-1.5 text-xs';
+
+    const backLink = document.createElement('button');
+    backLink.type = 'button';
+    backLink.className =
+      'inline-flex items-center gap-1.5 text-slate-500 dark:text-slate-400 hover:text-brand transition-colors font-medium';
+    backLink.innerHTML = '<i class="fa-solid fa-arrow-left text-[10px]" aria-hidden="true"></i><span>Clientes</span>';
+    backLink.addEventListener('click', () => {
+      currentView = 'lista';
+      fetchClientes();
+    });
+
+    const sep = document.createElement('span');
+    sep.className = 'text-slate-300 dark:text-slate-600';
+    sep.textContent = '/';
+
+    const currentCrumb = document.createElement('span');
+    currentCrumb.className = 'text-brand font-semibold';
+    currentCrumb.textContent = 'Vista Previa del Cliente';
+
+    breadcrumb.append(backLink, sep, currentCrumb);
+
+    const titleBar = document.createElement('div');
+    titleBar.className = 'flex flex-col sm:flex-row sm:items-center justify-between gap-3';
+
+    const titleLeft = document.createElement('div');
+    titleLeft.className = 'space-y-1';
+    titleLeft.innerHTML = `
+      <div class="flex flex-wrap items-center gap-2.5">
+        <h2 class="text-xl sm:text-2xl font-bold text-slate-900 dark:text-slate-100">${displayName}</h2>
+        <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-brand-soft dark:bg-brand/20 text-brand">
+          <i class="${isEmpresa ? 'fa-regular fa-building' : 'fa-regular fa-user'} text-[10px]"></i>
+          ${isEmpresa ? 'Empresa' : 'Persona física'}
+        </span>
+        <span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400">
+          <i class="fa-solid fa-circle text-[6px]"></i>Activo
+        </span>
+      </div>
+      <p class="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+        <i class="fa-regular fa-calendar-check text-brand" aria-hidden="true"></i>
+        <span>Fecha de alta del cliente: <strong class="font-semibold text-slate-700 dark:text-slate-200">${formatDateTimeFull(c.createdAt)}</strong></span>
+      </p>
+    `;
+
+    const actionButtons = document.createElement('div');
+    actionButtons.className = 'flex items-center gap-2.5 shrink-0';
+
+    const backBtn = createButton({
+      text: 'Volver',
+      icon: 'fa-solid fa-arrow-left',
+      variant: 'cancel',
+      size: 'sm',
+      onClick: () => {
+        currentView = 'lista';
+        fetchClientes();
+      },
+    });
+
+    const editBtn = createButton({
+      text: 'Editar cliente',
+      icon: 'fa-regular fa-pen-to-square',
+      variant: 'primary',
+      size: 'sm',
+      onClick: () => {
+        editingCliente = c;
+        currentView = 'form';
+        render();
+      },
+    });
+
+    actionButtons.append(backBtn, editBtn);
+    titleBar.append(titleLeft, actionButtons);
+    topHeader.append(breadcrumb, titleBar);
+    pageWrap.appendChild(topHeader);
+
+    // Helper para bloques de datos en modo lectura
+    function createReadOnlyItem(label, value) {
+      const box = document.createElement('div');
+      box.className =
+        'p-3.5 rounded-xl bg-slate-50/80 dark:bg-slate-800/50 border border-slate-200/60 dark:border-slate-800';
+      box.innerHTML = `
+        <p class="text-[11px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">${label}</p>
+        <p class="text-xs sm:text-sm font-semibold text-slate-800 dark:text-slate-100 mt-1 break-words">${value || '-'}</p>
+      `;
+      return box;
+    }
+
+    // Tarjeta destacada con Metadatos de Alta y Registro
+    const metaCard = document.createElement('div');
+    metaCard.className =
+      'w-full bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800 p-4 sm:p-5 shadow-xs';
+    const metaGrid = document.createElement('div');
+    metaGrid.className = 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5';
+    metaGrid.append(
+      createReadOnlyItem('ID de Cliente', `#${c.id || '-'}`),
+      createReadOnlyItem('Fecha de Alta (Registro)', formatDateTimeFull(c.createdAt)),
+      createReadOnlyItem('Última Actualización', formatDateTimeFull(c.updatedAt)),
+      createReadOnlyItem('Categoría', isEmpresa ? 'Empresa (Persona Jurídica)' : 'Persona Física')
+    );
+    metaCard.appendChild(metaGrid);
+    pageWrap.appendChild(metaCard);
+
+    // Tarjeta principal con las 4 secciones de información del cliente
+    const detailCard = document.createElement('div');
+    detailCard.className =
+      'w-full bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800 p-4 sm:p-6 shadow-xs space-y-6';
+
+    // Sección 1
+    const sec1 = document.createElement('section');
+    if (!isEmpresa) {
+      sec1.appendChild(createSectionHeader('fa-regular fa-user', '1. IDENTIFICACIÓN PERSONAL'));
+      const g1 = document.createElement('div');
+      g1.className = 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4';
+      g1.append(
+        createReadOnlyItem('Tipo de documento', c.tipoDocumento),
+        createReadOnlyItem('Número de documento', c.numeroDocumento),
+        createReadOnlyItem('Nombres', c.nombres),
+        createReadOnlyItem('Apellidos', c.apellidos),
+        createReadOnlyItem('Fecha de nacimiento', formatDateOnly(c.fechaNacimiento)),
+        createReadOnlyItem('Sexo', c.sexo),
+        createReadOnlyItem('Nacionalidad', c.nacionalidad || 'Paraguay')
+      );
+      sec1.appendChild(g1);
+    } else {
+      sec1.appendChild(
+        createSectionHeader('fa-regular fa-building', '1. IDENTIFICACIÓN DE LA EMPRESA (PERSONA JURÍDICA)')
+      );
+      const g1 = document.createElement('div');
+      g1.className = 'grid grid-cols-1 sm:grid-cols-3 gap-4';
+      g1.append(
+        createReadOnlyItem('RUC Base', c.rucBase),
+        createReadOnlyItem('Razón Social', c.razonSocial),
+        createReadOnlyItem('Nombre de fantasía', c.nombreFantasia)
+      );
+      sec1.appendChild(g1);
+    }
+    detailCard.appendChild(sec1);
+
+    // Sección 2: Datos Fiscales
+    const sec2 = document.createElement('section');
+    sec2.appendChild(createSectionHeader('fa-regular fa-file-lines', '2. DATOS FISCALES'));
+    const g2 = document.createElement('div');
+    g2.className = 'grid grid-cols-1 sm:grid-cols-2 gap-4';
+    g2.appendChild(createReadOnlyItem('RUC (opcional)', c.ruc || 'No especificado'));
+    sec2.appendChild(g2);
+    detailCard.appendChild(sec2);
+
+    // Sección 3: Información de Contacto
+    const sec3 = document.createElement('section');
+    sec3.appendChild(
+      createSectionHeader(
+        isEmpresa ? 'fa-solid fa-users' : 'fa-solid fa-phone',
+        isEmpresa ? '3. REPRESENTANTE Y CONTACTO' : '3. INFORMACIÓN DE CONTACTO'
+      )
+    );
+    const g3 = document.createElement('div');
+    g3.className = 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4';
+    if (isEmpresa) {
+      g3.append(
+        createReadOnlyItem('Representante legal (Nombre)', c.representanteNombre),
+        createReadOnlyItem('Representante legal (Documento / C.I.)', c.representanteDocumento),
+        createReadOnlyItem('Persona de contacto', c.personaContacto)
+      );
+    }
+    g3.append(
+      createReadOnlyItem('WhatsApp / Celular', c.whatsappCompleto),
+      createReadOnlyItem('Teléfono adicional', c.telefonoCompleto || 'No especificado'),
+      createReadOnlyItem('Correo electrónico', c.email)
+    );
+    sec3.appendChild(g3);
+    detailCard.appendChild(sec3);
+
+    // Sección 4: Domicilio / Ubicación
+    const sec4 = document.createElement('section');
+    sec4.appendChild(createSectionHeader('fa-solid fa-location-dot', '4. DOMICILIO / UBICACIÓN'));
+    const g4 = document.createElement('div');
+    g4.className = 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4';
+    g4.append(
+      createReadOnlyItem('Dirección (Calle y número)', c.direccion),
+      createReadOnlyItem('Departamento', c.departamento),
+      createReadOnlyItem('Ciudad', c.ciudad),
+      createReadOnlyItem('Barrio', c.barrio),
+      createReadOnlyItem('Referencia / Ubicación', c.referencia)
+    );
+    sec4.appendChild(g4);
+    detailCard.appendChild(sec4);
+
+    pageWrap.appendChild(detailCard);
+    container.appendChild(pageWrap);
   }
 
   function renderFormView() {
@@ -893,6 +1182,8 @@ export function renderClientesModule(container, { subRoute = 'lista' } = {}) {
   function render() {
     if (currentView === 'lista') {
       renderListView();
+    } else if (currentView === 'detalle') {
+      renderDetailView();
     } else {
       renderFormView();
     }
