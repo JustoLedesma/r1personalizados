@@ -901,14 +901,53 @@ export function renderDifusionMensajesModule(container) {
     card.className =
       'w-full bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl p-5 sm:p-6 shadow-xs space-y-5';
 
+    let manualTextarea = null;
+    let quickPhoneComp = null;
+    let refreshChips = () => {};
+
     function getManualPhoneList() {
-      const raw = String(state.broadcast.manualNumbersText || '');
-      const parts = raw
-        .split(/[\n,;]+/)
-        .map((s) => normalizeDigits(s))
-        .filter((d) => d.length >= 6);
-      // Sin duplicados
-      return Array.from(new Set(parts));
+      const parts = [];
+
+      // 1. Del textarea (DOM directo o estado)
+      const textVal =
+        (manualTextarea && typeof manualTextarea.value === 'string'
+          ? manualTextarea.value
+          : state.broadcast.manualNumbersText) || '';
+      if (textVal.trim()) {
+        textVal.split(/[\n,;]+/).forEach((s) => {
+          const clean = normalizeDigits(s);
+          if (clean.length >= 6) parts.push(clean);
+        });
+      }
+
+      // 2. Del input rápido si el usuario escribió un número en la cajita
+      const quickNum =
+        (quickPhoneComp && typeof quickPhoneComp.getNumero === 'function'
+          ? quickPhoneComp.getNumero()
+          : state.broadcast.extraPhoneNum) || '';
+      if (quickNum.trim().length >= 6) {
+        const fullQuick =
+          quickPhoneComp && typeof quickPhoneComp.getFullNumber === 'function'
+            ? quickPhoneComp.getFullNumber()
+            : `${state.broadcast.extraPhoneCode || '+595'}${quickNum}`;
+        const cleanQuick = normalizeDigits(fullQuick);
+        if (cleanQuick.length >= 6 && !parts.includes(cleanQuick)) {
+          parts.push(cleanQuick);
+        }
+      }
+
+      // 3. Normalizar números al estándar internacional (Paraguay 595 si 9 dígitos o empieza con 09)
+      const normalized = parts.map((num) => {
+        let d = num.replace(/^0+/, '');
+        if (d.length === 9 && d.startsWith('9')) {
+          d = '595' + d;
+        } else if (d.length === 10 && d.startsWith('09')) {
+          d = '595' + d.slice(1);
+        }
+        return d;
+      });
+
+      return Array.from(new Set(normalized.filter((d) => d.length >= 7)));
     }
 
     function getTotalRecipientsCount() {
@@ -943,7 +982,7 @@ export function renderDifusionMensajesModule(container) {
         </span>
         <div>
           <h2 class="text-sm sm:text-base font-bold text-slate-900 dark:text-white">
-            Campaña de Difusión Masiva Programable
+            Campaña de Difusión Masiva
           </h2>
           <p class="text-xs text-slate-500 dark:text-slate-400">
             Envíe campañas masivas a múltiples números, a todos los clientes, todos los proveedores o ambos con intervalo personalizable.
@@ -1024,7 +1063,7 @@ export function renderDifusionMensajesModule(container) {
     timerTop.className = 'flex flex-wrap items-center justify-between gap-2';
     timerTop.innerHTML = `
       <label class="text-xs font-bold text-slate-800 dark:text-slate-100">
-        Temporizador / Intervalo entre mensajes <span class="text-danger">*</span> (Personalizable)
+        Temporizador / Intervalo entre mensajes <span class="text-danger">*</span>
       </label>
       <span class="text-[11px] font-semibold text-brand inline-flex items-center gap-1">
         <i class="fa-regular fa-clock"></i>
@@ -1281,34 +1320,48 @@ export function renderDifusionMensajesModule(container) {
     const selectedPreviewWrap = document.createElement('div');
     selectedPreviewWrap.className = 'space-y-2 pt-1';
 
-    const selectedItems = state.contacts.filter((c) => state.broadcast.selectedKeys.has(c.key));
-    selectedPreviewWrap.innerHTML = `
-      <div class="flex items-center justify-between">
-        <span class="text-xs font-bold text-slate-700 dark:text-slate-200">
-          Contactos Seleccionados (${selectedItems.length}):
-        </span>
-        <span class="text-[11px] text-slate-400">No se permiten números duplicados</span>
-      </div>
-    `;
+    const chipsHeaderWrap = document.createElement('div');
+    chipsHeaderWrap.className = 'flex items-center justify-between';
+
+    const recCountLabel = document.createElement('span');
+    recCountLabel.className = 'text-xs font-bold text-slate-700 dark:text-slate-200';
+
+    const noDupNotice = document.createElement('span');
+    noDupNotice.className = 'text-[11px] text-slate-400';
+    noDupNotice.textContent = 'No se permiten números duplicados';
+
+    chipsHeaderWrap.append(recCountLabel, noDupNotice);
+    selectedPreviewWrap.appendChild(chipsHeaderWrap);
 
     const chipsBox = document.createElement('div');
     chipsBox.className =
       'min-h-[44px] p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200/70 dark:border-slate-800 flex flex-wrap items-center gap-2';
+    selectedPreviewWrap.appendChild(chipsBox);
+    recipientsBox.appendChild(selectedPreviewWrap);
 
-    if (selectedItems.length === 0) {
-      chipsBox.innerHTML = `<span class="text-xs text-slate-400 italic">Aún no has seleccionado contactos del registro. Usa el buscador o los botones de arriba.</span>`;
-    } else {
-      selectedItems.forEach((c) => {
+    refreshChips = () => {
+      chipsBox.innerHTML = '';
+      const selectedDb = state.contacts.filter((c) => state.broadcast.selectedKeys.has(c.key));
+      const manualNums = getManualPhoneList();
+      const total = selectedDb.length + manualNums.length;
+
+      recCountLabel.textContent = `Destinatarios Seleccionados (${total}): ${selectedDb.length} del registro + ${manualNums.length} adicionales manuales`;
+
+      if (total === 0) {
+        chipsBox.innerHTML = `<span class="text-xs text-slate-400 italic">Aún no has seleccionado contactos del registro ni agregado números manuales.</span>`;
+        return;
+      }
+
+      // Chips de contactos de la BD
+      selectedDb.forEach((c) => {
         const chip = document.createElement('span');
         chip.className =
           'inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white dark:bg-slate-900 border border-brand/30 text-xs font-semibold text-slate-800 dark:text-slate-100 shadow-2xs';
         chip.innerHTML = `
-          <span class="text-[10px] font-bold uppercase text-brand">${c.origen}:</span>
+          <span class="text-[10px] font-bold uppercase text-brand">${escapeHtml(c.origen)}:</span>
           <span>${escapeHtml(c.nombre)}</span>
-          <span class="text-emerald-600 dark:text-emerald-400 font-mono text-[11px]">${escapeHtml(
-            c.telefono
-          )}</span>
-          <button type="button" class="text-slate-400 hover:text-danger cursor-pointer" title="Quitar de la selección">
+          <span class="text-emerald-600 dark:text-emerald-400 font-mono text-[11px]">${escapeHtml(c.telefono)}</span>
+          <button type="button" class="text-slate-400 hover:text-danger cursor-pointer ml-0.5" title="Quitar de la selección">
             <i class="fa-solid fa-xmark"></i>
           </button>
         `;
@@ -1318,10 +1371,29 @@ export function renderDifusionMensajesModule(container) {
         });
         chipsBox.appendChild(chip);
       });
-    }
 
-    selectedPreviewWrap.appendChild(chipsBox);
-    recipientsBox.appendChild(selectedPreviewWrap);
+      // Chips de números adicionales manuales
+      manualNums.forEach((num) => {
+        const chip = document.createElement('span');
+        chip.className =
+          'inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white dark:bg-slate-900 border border-emerald-400/50 text-xs font-semibold text-slate-800 dark:text-slate-100 shadow-2xs';
+        chip.innerHTML = `
+          <span class="text-[10px] font-bold uppercase text-emerald-600 dark:text-emerald-400">MANUAL:</span>
+          <span class="text-slate-900 dark:text-slate-100 font-mono text-[11px]">+${escapeHtml(num)}</span>
+          <button type="button" class="text-slate-400 hover:text-danger cursor-pointer ml-0.5" title="Quitar número manual">
+            <i class="fa-solid fa-xmark"></i>
+          </button>
+        `;
+        chip.querySelector('button')?.addEventListener('click', () => {
+          const remaining = manualNums.filter((n) => n !== num);
+          state.broadcast.manualNumbersText = remaining.join(', ');
+          if (manualTextarea) manualTextarea.value = state.broadcast.manualNumbersText;
+          updateHeaderBadge();
+          refreshChips();
+        });
+        chipsBox.appendChild(chip);
+      });
+    };
 
     // Números Adicionales Manuales (separados por coma o salto de línea + selector rápido con código de país)
     const manualNumbersSection = document.createElement('div');
@@ -1333,7 +1405,7 @@ export function renderDifusionMensajesModule(container) {
 
     const quickPhoneWrap = document.createElement('div');
     quickPhoneWrap.className = 'sm:col-span-8';
-    const quickPhoneComp = createPhoneInput({
+    quickPhoneComp = createPhoneInput({
       label: 'Agregar Número Adicional Rápido (con selector de país):',
       initialCode: state.broadcast.extraPhoneCode || '+595',
       initialNumber: state.broadcast.extraPhoneNum || '',
@@ -1341,13 +1413,15 @@ export function renderDifusionMensajesModule(container) {
       onChange: (val) => {
         state.broadcast.extraPhoneCode = val.code;
         state.broadcast.extraPhoneNum = val.number;
+        updateHeaderBadge();
+        refreshChips();
       },
     });
     quickPhoneWrap.appendChild(quickPhoneComp.element);
 
     const quickAddBtnWrap = document.createElement('div');
     quickAddBtnWrap.className = 'sm:col-span-4';
-    const manualTextarea = document.createElement('textarea');
+    manualTextarea = document.createElement('textarea');
 
     const addExtraNumBtn = createButton({
       text: 'Agregar a Números Adicionales',
@@ -1356,7 +1430,8 @@ export function renderDifusionMensajesModule(container) {
       size: 'md',
       className: 'w-full',
       onClick: () => {
-        const digits = normalizeDigits(quickPhoneComp.getFullNumber());
+        const fullNum = quickPhoneComp.getFullNumber();
+        const digits = normalizeDigits(fullNum);
         if (digits.length < 8) {
           toast.warning('Ingresa un número adicional válido.');
           return;
@@ -1369,9 +1444,11 @@ export function renderDifusionMensajesModule(container) {
         currentList.push(digits);
         state.broadcast.manualNumbersText = currentList.join(', ');
         state.broadcast.extraPhoneNum = '';
+        if (quickPhoneComp.inputElement) quickPhoneComp.inputElement.value = '';
         manualTextarea.value = state.broadcast.manualNumbersText;
         updateHeaderBadge();
-        toast.success(`Número ${digits} agregado a la difusión.`);
+        refreshChips();
+        toast.success(`Número +${digits} agregado a la difusión.`);
       },
     });
     quickAddBtnWrap.appendChild(addExtraNumBtn);
@@ -1390,11 +1467,15 @@ export function renderDifusionMensajesModule(container) {
     manualTextarea.addEventListener('input', (e) => {
       state.broadcast.manualNumbersText = e.target.value;
       updateHeaderBadge();
+      refreshChips();
     });
 
     manualNumbersSection.append(quickAddRow, manualLabel, manualTextarea);
     recipientsBox.appendChild(manualNumbersSection);
     card.appendChild(recipientsBox);
+
+    // Inicializar visualización de chips
+    refreshChips();
 
     // Bloque 3: Cargar Mensaje Predeterminado (Plantilla)
     const tplGroup = document.createElement('div');
@@ -1431,9 +1512,23 @@ export function renderDifusionMensajesModule(container) {
 
     function refreshBroadcastPreview() {
       broadcastPreviewHolder.innerHTML = '';
-      const sampleContact =
-        selectedItems[0] ||
-        state.contacts[0] || {
+      const selectedDb = state.contacts.filter((c) => state.broadcast.selectedKeys.has(c.key));
+      const manualNums = getManualPhoneList();
+
+      let sampleContact = selectedDb[0];
+      if (!sampleContact && manualNums.length > 0) {
+        sampleContact = {
+          nombre: 'Destinatario Adicional',
+          telefono: `+${manualNums[0]}`,
+          documento: '---',
+          ciudad: '---',
+          empresa: '---',
+          productos: 'Productos R1',
+          cantidad_productos: '1',
+        };
+      }
+      if (!sampleContact) {
+        sampleContact = state.contacts[0] || {
           nombre: 'Justo Ledesma',
           telefono: '+595986901117',
           documento: '4564525',
@@ -1442,6 +1537,8 @@ export function renderDifusionMensajesModule(container) {
           productos: 'Productos R1',
           cantidad_productos: '12',
         };
+      }
+
       broadcastPreviewHolder.appendChild(
         renderWhatsAppSimulationBox({
           text: state.broadcast.contenido,

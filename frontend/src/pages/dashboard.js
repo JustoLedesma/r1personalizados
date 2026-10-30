@@ -2,19 +2,19 @@ import { createButton } from '../components/button.js';
 import { createThemeToggle, getBrandLogoUrl } from '../components/theme.js';
 import { toast } from '../components/toast.js';
 import { apiFetch } from '../services/api.js';
-import { renderClientesModule } from './clientes.js?v=20261029_9';
-import { renderProveedoresModule } from './proveedores.js?v=20261029_9';
-import { renderPerfilesMensajesModule } from './perfiles-mensajes.js?v=20261029_9';
-import { renderSesionesWhatsAppModule } from './sesiones-whatsapp.js?v=20261029_9';
-import { renderDifusionMensajesModule } from './difusion-mensajes.js?v=20261029_9';
-import { renderReciclajeModule } from './reciclaje.js?v=20261029_9';
+import { renderClientesModule } from './clientes.js?v=20261030_2';
+import { renderProveedoresModule } from './proveedores.js?v=20261030_2';
+import { renderPerfilesMensajesModule } from './perfiles-mensajes.js?v=20261030_2';
+import { renderSesionesWhatsAppModule } from './sesiones-whatsapp.js?v=20261030_2';
+import { renderDifusionMensajesModule } from './difusion-mensajes.js?v=20261030_2';
+import { renderReciclajeModule } from './reciclaje.js?v=20261030_2';
 import {
   subscribeQueue,
   formatRemainingDuration,
   syncPendingTasksFromDB,
   setPreferredBroadcastTab,
   clearCompletedBroadcastBanner,
-} from '../services/queue-manager.js?v=20261029_9';
+} from '../services/queue-manager.js?v=20261030_2';
 
 export const MENU_MODULES = [
   { id: 'dashboard', label: 'Panel General', icon: 'fa-solid fa-table-cells-large', roles: ['admin', 'editor', 'viewer'] },
@@ -257,11 +257,11 @@ export function renderDashboardLayout(container, { user, activeModule = 'dashboa
     }
   });
 
-  // Indicadores en vivo en la parte superior al lado del estado de WhatsApp:
-  // 1) Progreso de Difusión en curso (conteo de enviados + barra de progreso)
-  // 2) Cuenta regresiva de Mensaje Programado (tiempo que falta + barra de progreso)
+  // Indicadores en vivo en la parte superior directamente al lado del estado de WhatsApp:
+  // 1) Progreso de Difusión en curso (conteo de enviados e.g. 1/50, porcentaje y barra de progreso)
+  // 2) Cuenta regresiva de Mensaje Programado (tiempo que falta y barra de progreso)
   const headerQueueBox = document.createElement('div');
-  headerQueueBox.className = 'flex items-center gap-2 overflow-x-auto no-scrollbar';
+  headerQueueBox.className = 'flex items-center gap-2 shrink-0';
 
   syncPendingTasksFromDB();
 
@@ -269,27 +269,43 @@ export function renderDashboardLayout(container, { user, activeModule = 'dashboa
     updateHeaderWhatsAppBadge(snap.whatsapp);
     headerQueueBox.innerHTML = '';
 
-    // Píldora de Difusión Masiva en curso o recién completada
-    if (snap.broadcast.active || (snap.broadcast.completed && snap.broadcast.total > 0)) {
+    // Píldora de Difusión Masiva en curso o recién completada (al lado de Online)
+    if (snap.broadcast && (snap.broadcast.active || (snap.broadcast.completed && snap.broadcast.total > 0))) {
       const b = snap.broadcast;
       const bPill = document.createElement('div');
       bPill.className =
-        'inline-flex items-center gap-2 px-3 py-1 rounded-full text-[11px] font-semibold bg-brand-soft/80 dark:bg-brand/20 text-brand border border-brand/30 shrink-0';
+        'inline-flex items-center gap-2 px-3 py-1 rounded-full text-[11px] font-semibold bg-brand-soft dark:bg-brand/20 text-brand border border-brand/40 shadow-2xs shrink-0';
 
       const goBtn = document.createElement('button');
       goBtn.type = 'button';
-      goBtn.title = 'Ver progreso de la campaña de difusión';
+      goBtn.title = b.active
+        ? `Campaña en curso: ${b.sent} de ${b.total} mensajes enviados (${b.progressPercent}%). Clic para ver detalles.`
+        : `Campaña de difusión completada (${b.total} de ${b.total}). Clic para ver detalles.`;
       goBtn.className = 'inline-flex items-center gap-2 cursor-pointer focus:outline-none';
-      goBtn.innerHTML = `
-        <i class="fa-solid ${b.active ? 'fa-bullhorn fa-beat-fade' : 'fa-circle-check'} text-xs"></i>
-        <span>
-          Difusión: <strong>${b.sent}/${b.total}</strong> enviados (${b.progressPercent}%)
-          ${b.active ? `<span class="text-[10px] opacity-80 ml-1">· próx. ${b.secondsToNext}s</span>` : ''}
-        </span>
-        <span class="w-16 sm:w-24 h-1.5 rounded-full bg-white/80 dark:bg-slate-800 overflow-hidden inline-flex">
-          <span class="h-full bg-brand transition-all duration-300" style="width: ${b.progressPercent}%"></span>
-        </span>
-      `;
+
+      if (b.active) {
+        goBtn.innerHTML = `
+          <i class="fa-solid fa-bullhorn fa-beat-fade text-brand text-xs"></i>
+          <span>
+            Difusión: <strong>${b.sent}/${b.total}</strong> (${b.progressPercent}%)
+            <span class="text-[10px] font-normal opacity-85 ml-1">· próx. ${b.secondsToNext}s</span>
+          </span>
+          <span class="w-16 sm:w-24 h-2 rounded-full bg-slate-200 dark:bg-slate-700 overflow-hidden inline-flex">
+            <span class="h-full bg-brand transition-all duration-300 rounded-full" style="width: ${b.progressPercent}%"></span>
+          </span>
+        `;
+      } else {
+        goBtn.innerHTML = `
+          <i class="fa-solid fa-circle-check text-emerald-500 text-xs"></i>
+          <span class="text-emerald-700 dark:text-emerald-300">
+            Difusión completada: <strong>${b.total}/${b.total}</strong> (100%)
+          </span>
+          <span class="w-12 sm:w-16 h-2 rounded-full bg-emerald-100 dark:bg-emerald-950/60 overflow-hidden inline-flex">
+            <span class="h-full bg-emerald-500 rounded-full" style="width: 100%"></span>
+          </span>
+        `;
+      }
+
       goBtn.addEventListener('click', () => {
         setPreferredBroadcastTab('difusion');
         if (typeof onNavigate === 'function') onNavigate('broadcast');
@@ -299,8 +315,8 @@ export function renderDashboardLayout(container, { user, activeModule = 'dashboa
       if (!b.active && b.completed) {
         const closeDoneBtn = document.createElement('button');
         closeDoneBtn.type = 'button';
-        closeDoneBtn.title = 'Ocultar aviso';
-        closeDoneBtn.className = 'text-brand hover:text-brand-active ml-0.5 cursor-pointer';
+        closeDoneBtn.title = 'Ocultar aviso de difusión';
+        closeDoneBtn.className = 'text-slate-400 hover:text-danger ml-0.5 cursor-pointer';
         closeDoneBtn.innerHTML = '<i class="fa-solid fa-xmark text-[10px]"></i>';
         closeDoneBtn.addEventListener('click', (e) => {
           e.stopPropagation();
@@ -313,7 +329,7 @@ export function renderDashboardLayout(container, { user, activeModule = 'dashboa
     }
 
     // Píldora de Mensaje(s) Programado(s) con tiempo restante y barra de progreso
-    if (snap.scheduled.length > 0) {
+    if (snap.scheduled && snap.scheduled.length > 0) {
       const nextSched = snap.scheduled[0];
       const extraCount = snap.scheduled.length - 1;
       const destName =
@@ -325,15 +341,15 @@ export function renderDashboardLayout(container, { user, activeModule = 'dashboa
       sPill.type = 'button';
       sPill.title = 'Ver mensaje programado en cola';
       sPill.className =
-        'inline-flex items-center gap-2 px-3 py-1 rounded-full text-[11px] font-semibold bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border border-amber-200/80 dark:border-amber-800/60 shrink-0 cursor-pointer hover:bg-amber-100/70 transition-colors';
+        'inline-flex items-center gap-2 px-3 py-1 rounded-full text-[11px] font-semibold bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border border-amber-200/80 dark:border-amber-800/60 shrink-0 cursor-pointer hover:bg-amber-100/70 transition-colors shadow-2xs';
       sPill.innerHTML = `
         <i class="fa-regular fa-clock text-amber-500 text-xs"></i>
         <span>
-          Programado (${ destName }): falta <strong>${formatRemainingDuration(nextSched.remainingSeconds)}</strong>
+          Programado (${destName}): falta <strong>${formatRemainingDuration(nextSched.remainingSeconds)}</strong>
           ${extraCount > 0 ? `<span class="text-[10px] opacity-80">(+${extraCount} más)</span>` : ''}
         </span>
-        <span class="w-14 sm:w-20 h-1.5 rounded-full bg-amber-200/60 dark:bg-slate-800 overflow-hidden inline-flex">
-          <span class="h-full bg-amber-500 transition-all duration-300" style="width: ${nextSched.progressPercent}%"></span>
+        <span class="w-14 sm:w-20 h-2 rounded-full bg-amber-200/60 dark:bg-slate-800 overflow-hidden inline-flex">
+          <span class="h-full bg-amber-500 transition-all duration-300 rounded-full" style="width: ${nextSched.progressPercent}%"></span>
         </span>
       `;
       sPill.addEventListener('click', () => {
@@ -345,7 +361,11 @@ export function renderDashboardLayout(container, { user, activeModule = 'dashboa
     }
   });
 
-  headerLeft.append(menuToggleBtn, pageTitle, statusBadge, headerQueueBox);
+  const waStatusGroup = document.createElement('div');
+  waStatusGroup.className = 'flex items-center gap-2 shrink-0';
+  waStatusGroup.append(statusBadge, headerQueueBox);
+
+  headerLeft.append(menuToggleBtn, pageTitle, waStatusGroup);
 
   const headerRight = document.createElement('div');
   headerRight.className = 'flex items-center gap-2 shrink-0';

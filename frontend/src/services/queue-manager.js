@@ -66,6 +66,7 @@ export function formatRemainingDuration(totalSeconds) {
 export function getQueueSnapshot() {
   const b = queueState.broadcast;
   const pct = b.total > 0 ? Math.min(100, Math.round((b.sent / b.total) * 100)) : 0;
+  b.progressPercent = pct;
 
   return {
     whatsapp: {
@@ -219,6 +220,7 @@ export async function syncPendingTasksFromDB() {
   if (initializedFromDB) return;
   initializedFromDB = true;
   try {
+    // 1. Sincronizar mensajes programados pendientes
     const res = await apiFetch('/api/difusion-mensajes?page=1&page_size=50&estado=Programado');
     if (res && Array.isArray(res.data)) {
       const now = Date.now();
@@ -246,8 +248,31 @@ export async function syncPendingTasksFromDB() {
         });
       });
       queueState.scheduled.sort((a, b) => a.targetTimeMs - b.targetTimeMs);
-      notify();
     }
+
+    // 2. Sincronizar campaña de difusión si quedaron mensajes en cola en BD
+    if (!queueState.broadcast.active) {
+      const resCola = await apiFetch('/api/difusion-mensajes?page=1&page_size=100&estado=En%20Cola&tipo=Difusi%C3%B3n');
+      if (resCola && Array.isArray(resCola.data) && resCola.data.length > 0) {
+        const queuedItems = resCola.data;
+        const safeInterval = queuedItems[0].intervaloSegundos || 30;
+        queueState.broadcast = {
+          active: true,
+          completed: false,
+          total: queuedItems.length + 1,
+          sent: 1,
+          intervalSeconds: safeInterval,
+          secondsToNext: safeInterval,
+          currentRecipient: queuedItems[0].nombreDestinatario && queuedItems[0].nombreDestinatario !== '—'
+            ? `${queuedItems[0].nombreDestinatario} (${queuedItems[0].telefonoDestinatario})`
+            : queuedItems[0].telefonoDestinatario,
+          items: queuedItems,
+        };
+        ensureTickerRunning();
+      }
+    }
+
+    notify();
   } catch (_) {
     // Continuar si el backend o tabla aún no está lista
   }
@@ -285,6 +310,7 @@ export async function startBroadcastJob({ items = [], intervalSeconds = 30 } = {
       completed: true,
       total: 1,
       sent: 1,
+      progressPercent: 100,
       intervalSeconds: safeInterval,
       secondsToNext: 0,
       currentRecipient: firstLabel,
@@ -294,11 +320,13 @@ export async function startBroadcastJob({ items = [], intervalSeconds = 30 } = {
     return savedItems;
   }
 
+  const initialPct = Math.round((1 / savedItems.length) * 100);
   queueState.broadcast = {
     active: true,
     completed: false,
     total: savedItems.length,
     sent: 1,
+    progressPercent: initialPct,
     intervalSeconds: safeInterval,
     secondsToNext: safeInterval,
     currentRecipient: firstLabel,
@@ -402,8 +430,12 @@ async function processTick() {
                 estado: 'Enviado',
               }),
             });
-          } catch (_) {
-            // Continuar aunque falle actualización puntual
+          } catch (err) {
+            const destLabel =
+              nextItem.nombreDestinatario && nextItem.nombreDestinatario !== '—'
+                ? `${nextItem.nombreDestinatario} (+${nextItem.telefonoDestinatario})`
+                : `+${nextItem.telefonoDestinatario}`;
+            toast.warning(`Aviso en difusión (${destLabel}): ${err.message || 'No se pudo entregar por WhatsApp (marcado como Fallido)'}`);
           }
         }
       }
