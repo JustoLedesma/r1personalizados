@@ -270,3 +270,45 @@ INSERT IGNORE INTO `unidades_medida` (`id`, `nombre`, `abreviatura`, `permite_de
 -- ALTER TABLE `users` ADD COLUMN `foto_perfil` LONGTEXT NULL;
 -- ALTER TABLE `users` ADD COLUMN `auto_logout_minutes` INT NOT NULL DEFAULT 0;
 
+-- ============================================================================
+-- Módulo: Catálogo de Productos con soporte para Reciclaje
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS `productos` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `nombre` VARCHAR(255) NOT NULL,
+  `sku` VARCHAR(100) NOT NULL UNIQUE,
+  `codigo_barras` VARCHAR(100) NULL,
+  `categoria_id` INT NOT NULL,
+  `marca_id` INT NULL,
+  `unidad_medida_id` INT NOT NULL DEFAULT 1,
+  `descripcion` TEXT NULL,
+  `proveedor_id` INT NULL,
+  `costo_compra` DECIMAL(15,2) NOT NULL DEFAULT 0,
+  `precio_venta` DECIMAL(15,2) NOT NULL DEFAULT 0,
+  `iva` VARCHAR(20) NOT NULL DEFAULT '10%',
+  `controlar_stock` TINYINT(1) NOT NULL DEFAULT 1,
+  `stock_actual` DECIMAL(12,2) NOT NULL DEFAULT 0,
+  `stock_minimo` DECIMAL(12,2) NOT NULL DEFAULT 0,
+  `activo` TINYINT(1) NOT NULL DEFAULT 1,
+  `mostrar_en_web` TINYINT(1) NOT NULL DEFAULT 1,
+  `mostrar_precio` TINYINT(1) NOT NULL DEFAULT 1,
+  `permitir_sin_stock` TINYINT(1) NOT NULL DEFAULT 0,
+  `en_promocion` TINYINT(1) NOT NULL DEFAULT 0,
+  `foto_principal` LONGTEXT NULL,
+  `galeria_fotos` LONGTEXT NULL,
+  `deleted_at` DATETIME NULL DEFAULT NULL,
+  `deleted_by` VARCHAR(150) NULL DEFAULT NULL,
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX `idx_productos_sku` (`sku`),
+  INDEX `idx_productos_nombre` (`nombre`),
+  INDEX `idx_productos_categoria` (`categoria_id`),
+  INDEX `idx_productos_marca` (`marca_id`),
+  INDEX `idx_productos_proveedor` (`proveedor_id`),
+  INDEX `idx_productos_activo` (`activo`),
+  INDEX `idx_productos_deleted_at` (`deleted_at`),
+  CONSTRAINT `fk_productos_categoria` FOREIGN KEY (`categoria_id`) REFERENCES `categorias_productos`(`id`),
+  CONSTRAINT `fk_productos_unidad` FOREIGN KEY (`unidad_medida_id`) REFERENCES `unidades_medida`(`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+

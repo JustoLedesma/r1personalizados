@@ -1,5 +1,5 @@
-import { renderLoginPage } from './pages/login.js?v=20261030_5';
-import { renderDashboardLayout, MENU_MODULES } from './pages/dashboard.js?v=20261030_5';
+import { renderLoginPage } from './pages/login.js?v=20261030_8';
+import { renderDashboardLayout, MENU_MODULES } from './pages/dashboard.js?v=20261030_8';
 
 const SESSION_STORAGE_KEY = 'r1_session_user';
 

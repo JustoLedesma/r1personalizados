@@ -2,20 +2,21 @@ import { createButton } from '../components/button.js';
 import { createThemeToggle, getBrandLogoUrl } from '../components/theme.js';
 import { toast } from '../components/toast.js';
 import { apiFetch } from '../services/api.js';
-import { renderClientesModule } from './clientes.js?v=20261030_5';
-import { renderProveedoresModule } from './proveedores.js?v=20261030_5';
-import { renderPerfilesMensajesModule } from './perfiles-mensajes.js?v=20261030_5';
-import { renderSesionesWhatsAppModule } from './sesiones-whatsapp.js?v=20261030_5';
-import { renderDifusionMensajesModule } from './difusion-mensajes.js?v=20261030_5';
-import { renderReciclajeModule } from './reciclaje.js?v=20261030_5';
-import { renderConfiguracionModule } from './configuracion.js?v=20261030_5';
+import { renderClientesModule } from './clientes.js?v=20261030_8';
+import { renderProveedoresModule } from './proveedores.js?v=20261030_8';
+import { renderPerfilesMensajesModule } from './perfiles-mensajes.js?v=20261030_8';
+import { renderSesionesWhatsAppModule } from './sesiones-whatsapp.js?v=20261030_8';
+import { renderDifusionMensajesModule } from './difusion-mensajes.js?v=20261030_8';
+import { renderReciclajeModule } from './reciclaje.js?v=20261030_8';
+import { renderConfiguracionModule } from './configuracion.js?v=20261030_8';
+import { renderProductosModule } from './productos.js?v=20261030_8';
 import {
   subscribeQueue,
   formatRemainingDuration,
   syncPendingTasksFromDB,
   setPreferredBroadcastTab,
   clearCompletedBroadcastBanner,
-} from '../services/queue-manager.js?v=20261030_5';
+} from '../services/queue-manager.js?v=20261030_8';
 
 export const MENU_MODULES = [
   { id: 'dashboard', label: 'Panel General', icon: 'fa-solid fa-table-cells-large', roles: ['admin', 'editor', 'viewer'] },
@@ -420,6 +421,8 @@ export function renderDashboardLayout(container, { user, activeModule = 'dashboa
       renderReciclajeModule(mainArea);
     } else if (currentMod.id === 'configuracion') {
       renderConfiguracionModule(mainArea);
+    } else if (currentMod.id === 'productos') {
+      renderProductosModule(mainArea);
     } else if (currentMod.id === 'dashboard') {
       renderDashboardSummary(mainArea, onNavigate);
     } else {
