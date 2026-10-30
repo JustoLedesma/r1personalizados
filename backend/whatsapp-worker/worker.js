@@ -1,0 +1,860 @@
+const http = require('http');
+const fs = require('fs');
+const path = require('path');
+const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
+const QRCode = require('qrcode');
+
+const PORT = parseInt(process.env.WA_WORKER_PORT || '3009', 10);
+const AUTH_DIR = path.join(__dirname, '.wwebjs_auth');
+
+let client = null;
+let isStarting = false;
+let manualStopped = false;
+let isRestartingMode = false;
+let state = {
+  status: 'DISCONNECTED', // DISCONNECTED | STOPPED | RESTARTING | INITIALIZING | QR_READY | AUTHENTICATED | CONNECTED
+  connected: false,
+  restartStartedAt: null,
+  qrRaw: '',
+  qrDataUrl: '',
+  qrUpdatedAt: null,
+  account: null,
+  lastError: '',
+  browserPath: ''
+};
+
+function findBrowserExecutable() {
+  if (process.env.PUPPETEER_EXECUTABLE_PATH && fs.existsSync(process.env.PUPPETEER_EXECUTABLE_PATH)) {
+    return process.env.PUPPETEER_EXECUTABLE_PATH;
+  }
+  const candidates = [
+    'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+    'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+    'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
+    'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
+    '/usr/bin/chromium',
+    '/usr/bin/chromium-browser',
+    '/usr/bin/google-chrome',
+    '/usr/bin/google-chrome-stable'
+  ];
+  for (const candidate of candidates) {
+    try {
+      if (fs.existsSync(candidate)) {
+        return candidate;
+      }
+    } catch (_) {}
+  }
+  return '';
+}
+
+function nowISO() {
+  return new Date().toISOString();
+}
+
+function formatPlatformLabel(platform) {
+  const p = String(platform || '').toLowerCase();
+  if (p === 'smba') return 'WhatsApp Business (Android)';
+  if (p === 'smbi') return 'WhatsApp Business (iPhone)';
+  if (p === 'android') return 'WhatsApp Personal (Android)';
+  if (p === 'iphone' || p === 'ios') return 'WhatsApp Personal (iPhone)';
+  return platform ? `WhatsApp (${platform})` : 'WhatsApp Web';
+}
+
+async function fetchImageAsDataUrl(url) {
+  if (!url) return '';
+  if (url.startsWith('data:image/')) return url;
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return url;
+    const contentType = res.headers.get('content-type') || 'image/jpeg';
+    const arrayBuffer = await res.arrayBuffer();
+    const base64 = Buffer.from(arrayBuffer).toString('base64');
+    return `data:${contentType};base64,${base64}`;
+  } catch (_) {
+    return url;
+  }
+}
+
+/**
+ * Aplica parches de compatibilidad en el contexto de WhatsApp Web (pupPage)
+ * para corregir el error de memoización de getters (`id` requerido en `msgToMediaType`)
+ * y garantizar el envío real de texto, imágenes, videos y PDFs.
+ */
+async function ensureWWebJSPatched() {
+  if (!client || !client.pupPage) return;
+  try {
+    await client.pupPage.evaluate(() => {
+      if (!window.WWebJS) return;
+
+      window.WWebJS.processMediaData = async (
+        mediaInfo,
+        {
+          forceSticker,
+          forceGif,
+          forceVoice,
+          forceDocument,
+          forceMediaHd,
+          sendToChannel,
+          sendToStatus,
+        } = {}
+      ) => {
+        const file = window.WWebJS.mediaInfoToFile(mediaInfo);
+        const OpaqueData = window.require('WAWebMediaOpaqueData');
+        const opaqueData = await OpaqueData.createFromData(file, mediaInfo.mimetype);
+        const mediaParams = {
+          asSticker: forceSticker,
+          asGif: forceGif,
+          isPtt: forceVoice,
+          asDocument: forceDocument,
+        };
+
+        if (forceMediaHd && file.type.indexOf('image/') === 0) {
+          mediaParams.maxDimension = 2560;
+        }
+
+        const mediaPrep = window.require('WAWebPrepRawMedia').prepRawMedia(opaqueData, mediaParams);
+        const mediaData = await mediaPrep.waitForPrep();
+        const mediaObject = window.require('WAWebMediaStorage').getOrCreateMediaObject(mediaData.filehash);
+
+        const tempId = mediaData.filehash || 'media_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+        if (mediaObject && !mediaObject.id) {
+          mediaObject.id = tempId;
+        }
+
+        let mediaType = 'image';
+        try {
+          mediaType = window.require('WAWebMmsMediaTypes').msgToMediaType({
+            id: tempId,
+            type: mediaData.type,
+            isGif: Boolean(mediaData.isGif),
+            isNewsletter: Boolean(sendToChannel),
+          });
+        } catch (_) {
+          mediaType = mediaData.type || 'document';
+        }
+
+        if (!mediaData.filehash) {
+          throw new Error('media-fault: sendToChat filehash undefined');
+        }
+
+        if ((forceVoice && mediaData.type === 'ptt') || (sendToStatus && mediaData.type === 'audio')) {
+          const waveform = mediaObject.contentInfo && mediaObject.contentInfo.waveform;
+          mediaData.waveform = waveform || (await window.WWebJS.generateWaveform(file));
+        }
+
+        if (!(mediaData.mediaBlob instanceof OpaqueData)) {
+          mediaData.mediaBlob = await OpaqueData.createFromData(
+            mediaData.mediaBlob,
+            mediaData.mediaBlob.type
+          );
+        }
+
+        mediaData.renderableUrl = mediaData.mediaBlob.url();
+        mediaObject.consolidate(mediaData.toJSON());
+        mediaData.mediaBlob.autorelease();
+
+        try {
+          const shouldUseMediaCache = window
+            .require('WAWebMediaDataUtils')
+            .shouldUseMediaCache(
+              window.require('WAWebMmsMediaTypes').castToV4(mediaObject.type)
+            );
+          if (shouldUseMediaCache && mediaData.mediaBlob instanceof OpaqueData) {
+            const formData = mediaData.mediaBlob.formData();
+            window.require('WAWebMediaInMemoryBlobCache').InMemoryMediaBlobCache.put(
+              mediaObject.filehash,
+              formData
+            );
+          }
+        } catch (_) {}
+
+        const dataToUpload = {
+          mimetype: mediaData.mimetype,
+          mediaObject,
+          mediaType,
+          ...(sendToChannel
+            ? {
+                calculateToken: window.require('WAMediaCalculateFilehash').getRandomFilehash,
+              }
+            : {}),
+        };
+
+        const { uploadMedia, uploadUnencryptedMedia } = window.require('WAWebMediaMmsV4Upload');
+        const uploadedMedia = !sendToChannel
+          ? await uploadMedia(dataToUpload)
+          : await uploadUnencryptedMedia(dataToUpload);
+
+        const mediaEntry = uploadedMedia.mediaEntry;
+        if (!mediaEntry) {
+          throw new Error('upload failed: media entry was not created');
+        }
+
+        mediaData.set({
+          clientUrl: mediaEntry.mmsUrl,
+          deprecatedMms3Url: mediaEntry.deprecatedMms3Url,
+          directPath: mediaEntry.directPath,
+          mediaKey: mediaEntry.mediaKey,
+          mediaKeyTimestamp: mediaEntry.mediaKeyTimestamp,
+          filehash: mediaObject.filehash,
+          encFilehash: mediaEntry.encFilehash,
+          uploadhash: mediaEntry.uploadHash,
+          size: mediaObject.size,
+          streamingSidecar: mediaEntry.sidecar,
+          firstFrameSidecar: mediaEntry.firstFrameSidecar,
+          mediaHandle: sendToChannel ? mediaEntry.handle : null,
+        });
+
+        return mediaData;
+      };
+
+      window.WWebJS.getChat = async (chatId, { getAsModel = true } = {}) => {
+        const isChannel = /@\w*newsletter\b/.test(chatId);
+        const chatWid = window.require('WAWebWidFactory').createWid(chatId);
+        let chat;
+
+        if (isChannel) {
+          try {
+            chat = window.require('WAWebCollections').WAWebNewsletterCollection.get(chatId);
+            if (!chat) {
+              await window.require('WAWebLoadNewsletterPreviewChatAction').loadNewsletterPreviewChat(chatId);
+              chat = await window.require('WAWebCollections').WAWebNewsletterCollection.find(chatWid);
+            }
+          } catch (_) {
+            chat = null;
+          }
+        } else {
+          chat = window.require('WAWebCollections').Chat.get(chatWid);
+          if (!chat) {
+            const found = await window.require('WAWebFindChatAction').findOrCreateLatestChat(chatWid);
+            chat = (found && found.chat) ? found.chat : found;
+          }
+        }
+
+        return getAsModel && chat
+          ? await window.WWebJS.getChatModel(chat, { isChannel })
+          : chat;
+      };
+    });
+  } catch (err) {
+    console.error('[WA-WORKER] Error aplicando parche WWebJS:', err.message || err);
+  }
+}
+
+async function populateAccountInfo() {
+  if (!client || !client.info) return;
+  const info = client.info;
+  const userNum = (info.wid && info.wid.user) ? String(info.wid.user) : '';
+  const serializedWid = (info.wid && info.wid._serialized) ? info.wid._serialized : `${userNum}@c.us`;
+  const pushname = info.pushname || 'Cuenta vinculada';
+  const rawPlatform = info.platform || 'web';
+  const platformLabel = formatPlatformLabel(rawPlatform);
+  const isBusiness = rawPlatform === 'smba' || rawPlatform === 'smbi';
+
+  let profilePicUrl = (state.account && state.account.profilePicUrl) || '';
+  if (!profilePicUrl) {
+    try {
+      const rawUrl = await client.getProfilePicUrl(serializedWid);
+      if (rawUrl) {
+        profilePicUrl = await fetchImageAsDataUrl(rawUrl);
+      }
+    } catch (_) {}
+  }
+
+  // Extraer datos extendidos desde WhatsApp Web (Acerca de, Perfil Business, Contadores de Chats, Contactos, Grupos, No leídos, Versión)
+  let extra = {
+    about: '',
+    isBusiness,
+    businessDescription: '',
+    businessAddress: '',
+    businessEmail: '',
+    businessWebsite: '',
+    businessCategory: '',
+    chatsCount: 0,
+    groupsCount: 0,
+    unreadChatsCount: 0,
+    unreadMessagesCount: 0,
+    contactsCount: 0,
+    wwebVersion: '',
+    thumbBase64: ''
+  };
+
+  try {
+    if (client.pupPage) {
+      const pageExtra = await client.pupPage.evaluate(async (widStr) => {
+        const out = {
+          about: '',
+          isBusiness: false,
+          businessDescription: '',
+          businessAddress: '',
+          businessEmail: '',
+          businessWebsite: '',
+          businessCategory: '',
+          chatsCount: 0,
+          groupsCount: 0,
+          unreadChatsCount: 0,
+          unreadMessagesCount: 0,
+          contactsCount: 0,
+          wwebVersion: (window.Debug && window.Debug.VERSION) ? String(window.Debug.VERSION) : '',
+          thumbBase64: ''
+        };
+
+        try {
+          const collections = window.require('WAWebCollections');
+          if (collections && collections.Chat) {
+            const allChats = collections.Chat.getModelsArray() || [];
+            out.chatsCount = allChats.length;
+            let groups = 0;
+            let unreadChats = 0;
+            let unreadMsgs = 0;
+            for (const c of allChats) {
+              if (c.isGroup || (c.id && c.id.server === 'g.us')) groups++;
+              const u = Number(c.unreadCount || 0);
+              if (u > 0) {
+                unreadChats++;
+                unreadMsgs += u;
+              }
+            }
+            out.groupsCount = groups;
+            out.unreadChatsCount = unreadChats;
+            out.unreadMessagesCount = unreadMsgs;
+          }
+
+          if (collections && collections.Contact) {
+            const allContacts = collections.Contact.getModelsArray() || [];
+            out.contactsCount = allContacts.filter((c) => c && c.isMyContact).length || allContacts.length;
+          }
+
+          const wid = window.require('WAWebWidFactory').createWid(widStr);
+
+          // Intentar miniatura en base64 si no hay URL directa
+          if (window.WWebJS && typeof window.WWebJS.getProfilePicThumbToBase64 === 'function') {
+            try {
+              const t = await window.WWebJS.getProfilePicThumbToBase64(wid);
+              if (t) out.thumbBase64 = `data:image/jpeg;base64,${t}`;
+            } catch (_) {}
+          }
+
+          // Intentar estado / Acerca de
+          try {
+            const statusRes = await window.require('WAWebContactStatusBridge').getStatus(wid);
+            if (statusRes && statusRes.status) {
+              out.about = String(statusRes.status);
+            }
+          } catch (_) {}
+
+          // Intentar Perfil de Empresa (WhatsApp Business)
+          try {
+            if (collections && collections.BusinessProfile) {
+              const bp = await collections.BusinessProfile.find(wid);
+              if (bp) {
+                out.isBusiness = true;
+                out.businessDescription = bp.description || '';
+                out.businessAddress = bp.address || '';
+                out.businessEmail = bp.email || '';
+                if (Array.isArray(bp.website) && bp.website.length > 0) {
+                  out.businessWebsite = bp.website[0].url || bp.website[0] || '';
+                }
+                if (Array.isArray(bp.categories) && bp.categories.length > 0) {
+                  out.businessCategory = bp.categories.map((cat) => cat.localized_display_name || cat.name || '').filter(Boolean).join(', ');
+                }
+              }
+            }
+          } catch (_) {}
+        } catch (_) {}
+
+        return out;
+      }, serializedWid);
+
+      if (pageExtra) {
+        extra = { ...extra, ...pageExtra };
+      }
+    }
+  } catch (_) {}
+
+  if (!profilePicUrl && extra.thumbBase64) {
+    profilePicUrl = extra.thumbBase64;
+  }
+
+  const prevConnectedAt = state.account && state.account.connectedAt ? state.account.connectedAt : nowISO();
+  state.account = {
+    phone: userNum,
+    name: pushname,
+    platform: rawPlatform,
+    platformLabel,
+    isBusiness: Boolean(isBusiness || extra.isBusiness),
+    about: extra.about || '',
+    businessDescription: extra.businessDescription || '',
+    businessAddress: extra.businessAddress || '',
+    businessEmail: extra.businessEmail || '',
+    businessWebsite: extra.businessWebsite || '',
+    businessCategory: extra.businessCategory || '',
+    chatsCount: extra.chatsCount || 0,
+    groupsCount: extra.groupsCount || 0,
+    unreadChatsCount: extra.unreadChatsCount || 0,
+    unreadMessagesCount: extra.unreadMessagesCount || 0,
+    contactsCount: extra.contactsCount || 0,
+    wwebVersion: extra.wwebVersion || '',
+    profilePicUrl,
+    connectedAt: prevConnectedAt,
+    lastActivityAt: (state.account && state.account.lastActivityAt) ? state.account.lastActivityAt : nowISO()
+  };
+}
+
+async function startClient({ asRestart = false } = {}) {
+  if (isStarting) {
+    return;
+  }
+  if (!asRestart && client && (state.status === 'CONNECTED' || state.status === 'QR_READY' || state.status === 'INITIALIZING' || state.status === 'AUTHENTICATED' || state.status === 'RESTARTING')) {
+    return;
+  }
+
+  manualStopped = false;
+  isStarting = true;
+  isRestartingMode = Boolean(asRestart);
+  state.status = asRestart ? 'RESTARTING' : 'INITIALIZING';
+  state.restartStartedAt = asRestart ? nowISO() : null;
+  state.connected = false;
+  state.qrRaw = '';
+  state.qrDataUrl = '';
+  state.lastError = '';
+
+  const executablePath = findBrowserExecutable();
+  state.browserPath = executablePath;
+
+  const puppeteerOpts = {
+    headless: true,
+    args: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-accelerated-2d-canvas',
+      '--no-first-run',
+      '--no-zygote',
+      '--disable-gpu'
+    ]
+  };
+  if (executablePath) {
+    puppeteerOpts.executablePath = executablePath;
+  }
+
+  try {
+    if (client) {
+      try {
+        await client.destroy();
+      } catch (_) {}
+      client = null;
+    }
+
+    client = new Client({
+      authStrategy: new LocalAuth({
+        clientId: 'netz-r1-main',
+        dataPath: AUTH_DIR
+      }),
+      puppeteer: puppeteerOpts
+    });
+
+    client.on('qr', async (qr) => {
+      if (manualStopped) return;
+      try {
+        const dataUrl = await QRCode.toDataURL(qr, {
+          errorCorrectionLevel: 'M',
+          margin: 2,
+          width: 320,
+          color: {
+            dark: '#0f172a',
+            light: '#ffffff'
+          }
+        });
+        isRestartingMode = false;
+        state.restartStartedAt = null;
+        state.status = 'QR_READY';
+        state.connected = false;
+        state.qrRaw = qr;
+        state.qrDataUrl = dataUrl;
+        state.qrUpdatedAt = nowISO();
+        state.lastError = '';
+      } catch (err) {
+        state.lastError = 'Error al generar imagen QR: ' + (err.message || String(err));
+      }
+    });
+
+    client.on('authenticated', () => {
+      if (manualStopped) return;
+      state.status = isRestartingMode ? 'RESTARTING' : 'AUTHENTICATED';
+      state.qrRaw = '';
+      state.qrDataUrl = '';
+      state.lastError = '';
+    });
+
+    client.on('auth_failure', (msg) => {
+      isRestartingMode = false;
+      state.restartStartedAt = null;
+      state.status = 'DISCONNECTED';
+      state.connected = false;
+      state.lastError = 'Fallo de autenticación: ' + (msg || 'Sesión expirada');
+    });
+
+    client.on('ready', async () => {
+      if (manualStopped) return;
+      isRestartingMode = false;
+      state.restartStartedAt = null;
+      state.status = 'CONNECTED';
+      state.connected = true;
+      state.qrRaw = '';
+      state.qrDataUrl = '';
+      state.lastError = '';
+      await ensureWWebJSPatched();
+      await populateAccountInfo();
+      if (state.account) {
+        state.account.connectedAt = nowISO();
+        state.account.lastActivityAt = nowISO();
+      }
+      console.log('[WA-WORKER] Cliente WhatsApp conectado y listo.');
+    });
+
+    client.on('disconnected', async (reason) => {
+      isRestartingMode = false;
+      state.restartStartedAt = null;
+      state.status = manualStopped ? 'STOPPED' : 'DISCONNECTED';
+      state.connected = false;
+      state.qrRaw = '';
+      state.qrDataUrl = '';
+      if (state.account) {
+        state.account.lastActivityAt = nowISO();
+      }
+      if (!manualStopped) {
+        state.lastError = reason ? `Sesión desconectada (${reason})` : '';
+      }
+      try {
+        if (client) {
+          await client.destroy();
+        }
+      } catch (_) {}
+      client = null;
+    });
+
+    client.initialize().catch((err) => {
+      if (manualStopped) return;
+      isRestartingMode = false;
+      state.restartStartedAt = null;
+      state.status = 'DISCONNECTED';
+      state.connected = false;
+      state.lastError = 'No se pudo iniciar el navegador en segundo plano: ' + (err.message || String(err));
+      client = null;
+    });
+  } catch (err) {
+    isRestartingMode = false;
+    state.restartStartedAt = null;
+    state.status = 'DISCONNECTED';
+    state.connected = false;
+    state.lastError = 'Error inicializando cliente WhatsApp: ' + (err.message || String(err));
+    client = null;
+  } finally {
+    isStarting = false;
+  }
+}
+
+async function stopClient() {
+  manualStopped = true;
+  isStarting = false;
+  isRestartingMode = false;
+  state.restartStartedAt = null;
+  if (client) {
+    try {
+      await client.destroy();
+    } catch (_) {}
+    client = null;
+  }
+  state.status = 'STOPPED';
+  state.connected = false;
+  state.qrRaw = '';
+  state.qrDataUrl = '';
+  state.lastError = '';
+  if (state.account) {
+    state.account.lastActivityAt = nowISO();
+  }
+}
+
+async function restartClient() {
+  isStarting = false;
+  manualStopped = false;
+  isRestartingMode = true;
+  state.status = 'RESTARTING';
+  state.restartStartedAt = nowISO();
+  state.connected = false;
+  state.qrRaw = '';
+  state.qrDataUrl = '';
+  state.lastError = '';
+
+  if (client) {
+    try {
+      await client.destroy();
+    } catch (_) {}
+    client = null;
+  }
+  await startClient({ asRestart: true });
+}
+
+async function deleteSessionAndRestart() {
+  manualStopped = false;
+  isStarting = false;
+  isRestartingMode = false;
+  state.restartStartedAt = null;
+  if (client) {
+    try {
+      await client.logout();
+    } catch (_) {}
+    try {
+      await client.destroy();
+    } catch (_) {}
+    client = null;
+  }
+
+  state.status = 'DISCONNECTED';
+  state.connected = false;
+  state.qrRaw = '';
+  state.qrDataUrl = '';
+  state.account = null;
+  state.lastError = '';
+
+  try {
+    if (fs.existsSync(AUTH_DIR)) {
+      fs.rmSync(AUTH_DIR, { recursive: true, force: true });
+    }
+  } catch (err) {
+    state.lastError = 'Aviso al limpiar credenciales locales: ' + (err.message || String(err));
+  }
+
+  // Iniciar automáticamente una nueva sesión para mostrar el QR de inmediato
+  await startClient({ asRestart: false });
+}
+
+function normalizePhoneDigits(raw) {
+  let digits = String(raw || '').replace(/\D/g, '');
+  if (digits.length === 10 && digits.startsWith('09')) {
+    digits = '595' + digits.slice(1);
+  } else if (digits.length === 9 && digits.startsWith('9')) {
+    digits = '595' + digits;
+  }
+  return digits;
+}
+
+function parseDataUrl(dataUrl, fallbackMime) {
+  const str = String(dataUrl || '').trim();
+  if (!str) return null;
+  const match = str.match(/^data:([^;]+);base64,(.+)$/i);
+  if (match) {
+    return {
+      mime: match[1],
+      base64: match[2]
+    };
+  }
+  return {
+    mime: fallbackMime || 'application/octet-stream',
+    base64: str
+  };
+}
+
+async function resolveTargetChatId(digits) {
+  const defaultCUs = `${digits}@c.us`;
+  try {
+    const numberDetails = await client.getNumberId(digits);
+    if (!numberDetails) {
+      throw new Error(`El número +${digits} no está registrado en WhatsApp.`);
+    }
+    if (numberDetails._serialized) {
+      return numberDetails._serialized;
+    }
+  } catch (err) {
+    if (err.message && err.message.includes('no está registrado')) {
+      throw err;
+    }
+  }
+  return defaultCUs;
+}
+
+async function sendWhatsAppMessage(payload) {
+  if (!client || state.status !== 'CONNECTED') {
+    throw new Error('La cuenta de WhatsApp no está conectada. Vincula o inicia tu cuenta en Sesiones WhatsApp.');
+  }
+
+  const digits = normalizePhoneDigits(payload.phone);
+  if (!digits || digits.length < 7) {
+    throw new Error('Número de teléfono de destinatario inválido.');
+  }
+
+  const text = String(payload.message || '').trim();
+  const mediaObj = payload.media && payload.media.data ? payload.media : null;
+
+  if (!text && !mediaObj) {
+    throw new Error('Debes indicar un mensaje de texto o un archivo adjunto.');
+  }
+
+  await ensureWWebJSPatched();
+
+  const targetChatId = await resolveTargetChatId(digits);
+  const fallbackChatId = `${digits}@c.us`;
+
+  let sentMsg = null;
+  const baseSendOptions = {
+    sendSeen: false,
+    waitUntilMsgSent: true,
+    linkPreview: false
+  };
+
+  if (mediaObj && mediaObj.data) {
+    const parsed = parseDataUrl(mediaObj.data, mediaObj.mime);
+    if (!parsed || !parsed.base64) {
+      throw new Error('El archivo adjunto no tiene un formato Base64 válido.');
+    }
+    const filename = mediaObj.filename || 'adjunto';
+    const media = new MessageMedia(parsed.mime, parsed.base64, filename);
+    const sendOptions = { ...baseSendOptions };
+    if (text) {
+      sendOptions.caption = text;
+    }
+    if (parsed.mime === 'application/pdf') {
+      sendOptions.sendMediaAsDocument = true;
+    }
+
+    try {
+      sentMsg = await client.sendMessage(targetChatId, media, sendOptions);
+    } catch (firstErr) {
+      if (targetChatId !== fallbackChatId) {
+        sentMsg = await client.sendMessage(fallbackChatId, media, sendOptions);
+      } else {
+        throw firstErr;
+      }
+    }
+  } else {
+    try {
+      sentMsg = await client.sendMessage(targetChatId, text, baseSendOptions);
+    } catch (firstErr) {
+      if (targetChatId !== fallbackChatId) {
+        sentMsg = await client.sendMessage(fallbackChatId, text, baseSendOptions);
+      } else {
+        throw firstErr;
+      }
+    }
+  }
+
+  if (state.account) {
+    state.account.lastActivityAt = nowISO();
+  }
+
+  return {
+    ok: true,
+    chatId: targetChatId,
+    messageId: (sentMsg && sentMsg.id && (sentMsg.id._serialized || sentMsg.id.id)) || 'sent_' + Date.now(),
+    timestamp: nowISO()
+  };
+}
+
+function sendJSON(res, statusCode, data) {
+  res.writeHead(statusCode, {
+    'Content-Type': 'application/json; charset=utf-8',
+    'Cache-Control': 'no-store'
+  });
+  res.end(JSON.stringify(data));
+}
+
+function readJsonBody(req) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    req.on('data', (chunk) => chunks.push(chunk));
+    req.on('end', () => {
+      if (chunks.length === 0) return resolve({});
+      try {
+        const raw = Buffer.concat(chunks).toString('utf8');
+        resolve(raw ? JSON.parse(raw) : {});
+      } catch (err) {
+        reject(err);
+      }
+    });
+    req.on('error', reject);
+  });
+}
+
+const server = http.createServer(async (req, res) => {
+  const url = new URL(req.url, `http://127.0.0.1:${PORT}`);
+  const pathname = url.pathname;
+
+  try {
+    if (req.method === 'GET' && pathname === '/status') {
+      if (client && client.pupPage && state.status !== 'CONNECTED' && state.status !== 'STOPPED' && state.status !== 'RESTARTING') {
+        try {
+          const isRegistered = await client.pupPage.evaluate(() => {
+            try {
+              const conn = window.require('WAWebConnModel')?.Conn;
+              return Boolean(conn && conn.isRegistered === true && conn.wid);
+            } catch (_) {
+              return false;
+            }
+          });
+          if (isRegistered && client.info && client.info.wid) {
+            state.status = 'CONNECTED';
+            state.connected = true;
+            state.qrRaw = '';
+            state.qrDataUrl = '';
+            await ensureWWebJSPatched();
+            await populateAccountInfo();
+          }
+        } catch (_) {}
+      }
+
+      // Si hay un código QR emitido y el cliente aún no tiene credenciales autenticadas, el estado real es QR_READY
+      if (state.qrRaw && (!client || !client.info || !client.info.wid)) {
+        if (state.status !== 'STOPPED' && state.status !== 'RESTARTING') {
+          state.status = 'QR_READY';
+          state.connected = false;
+        }
+      }
+
+      if (state.status === 'CONNECTED' && (!state.account || !state.account.phone || !state.account.profilePicUrl || !state.account.wwebVersion)) {
+        await populateAccountInfo();
+      }
+      return sendJSON(res, 200, state);
+    }
+
+    if (req.method === 'POST' && pathname === '/start') {
+      await startClient({ asRestart: false });
+      return sendJSON(res, 200, state);
+    }
+
+    if (req.method === 'POST' && pathname === '/restart') {
+      restartClient().catch((err) => {
+        console.error('[WA-WORKER RESTART ERROR]', err);
+      });
+      return sendJSON(res, 200, state);
+    }
+
+    if (req.method === 'POST' && pathname === '/stop') {
+      await stopClient();
+      return sendJSON(res, 200, state);
+    }
+
+    if (req.method === 'POST' && pathname === '/delete-session') {
+      await deleteSessionAndRestart();
+      return sendJSON(res, 200, state);
+    }
+
+    if (req.method === 'POST' && pathname === '/send') {
+      const body = await readJsonBody(req);
+      const result = await sendWhatsAppMessage(body);
+      return sendJSON(res, 200, result);
+    }
+
+    return sendJSON(res, 404, { error: 'Ruta de worker WhatsApp no encontrada' });
+  } catch (err) {
+    console.error('[WA-WORKER ERROR]', err);
+    return sendJSON(res, 500, {
+      error: err.message || 'Error interno en el worker de WhatsApp',
+      state
+    });
+  }
+});
+
+server.listen(PORT, '127.0.0.1', () => {
+  console.log(`[WA-WORKER] Escuchando en http://127.0.0.1:${PORT}`);
+  startClient({ asRestart: false });
+});

@@ -13,10 +13,11 @@ import (
 
 type DifusionMensajesHandler struct {
 	DB *sql.DB
+	WA *WhatsAppHandler
 }
 
-func NewDifusionMensajesHandler(dbConn *sql.DB) *DifusionMensajesHandler {
-	return &DifusionMensajesHandler{DB: dbConn}
+func NewDifusionMensajesHandler(dbConn *sql.DB, waHandler *WhatsAppHandler) *DifusionMensajesHandler {
+	return &DifusionMensajesHandler{DB: dbConn, WA: waHandler}
 }
 
 func (h *DifusionMensajesHandler) HandleCollection(w http.ResponseWriter, r *http.Request) {
@@ -263,9 +264,29 @@ func (h *DifusionMensajesHandler) Create(w http.ResponseWriter, r *http.Request)
 			return
 		}
 		inserted := 0
+		waSentCount := 0
+		var lastWaErr string
+		waConnected := h.WA != nil && h.WA.IsConnected()
 		for i := range items {
 			if strings.TrimSpace(items[i].TelefonoDestinatario) == "" || strings.TrimSpace(items[i].Contenido) == "" {
 				continue
+			}
+			if (items[i].Estado == "" || items[i].Estado == "Enviado") && items[i].Tipo != "Programado" {
+				if !waConnected {
+					items[i].Estado = "Fallido"
+					lastWaErr = "La cuenta de WhatsApp no está conectada"
+				} else if err := h.WA.SendMessage(
+					items[i].TelefonoDestinatario,
+					items[i].Contenido,
+					items[i].AdjuntoData,
+					items[i].AdjuntoMime,
+					items[i].AdjuntoNombre,
+				); err != nil {
+					items[i].Estado = "Fallido"
+					lastWaErr = err.Error()
+				} else {
+					waSentCount++
+				}
 			}
 			id, err := h.insertOne(r, &items[i])
 			if err != nil {
@@ -278,8 +299,10 @@ func (h *DifusionMensajesHandler) Create(w http.ResponseWriter, r *http.Request)
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(http.StatusCreated)
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"inserted": inserted,
-			"items":    items,
+			"inserted":      inserted,
+			"whatsapp_sent": waSentCount,
+			"whatsapp_err":  lastWaErr,
+			"items":         items,
 		})
 		return
 	}
@@ -301,12 +324,41 @@ func (h *DifusionMensajesHandler) Create(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// Si es un envío inmediato (no Programado), enviarlo por WhatsApp Web y registrar siempre en BD
+	var waSendErr error
+	if single.Tipo != "Programado" && (single.Estado == "" || single.Estado == "Enviado") {
+		if h.WA == nil || !h.WA.IsConnected() {
+			single.Estado = "Fallido"
+			waSendErr = sql.ErrConnDone
+		} else {
+			if err := h.WA.SendMessage(
+				single.TelefonoDestinatario,
+				single.Contenido,
+				single.AdjuntoData,
+				single.AdjuntoMime,
+				single.AdjuntoNombre,
+			); err != nil {
+				single.Estado = "Fallido"
+				waSendErr = err
+			}
+		}
+	}
+
 	id, err := h.insertOne(r, &single)
 	if err != nil {
 		auth.WriteJSONError(w, http.StatusInternalServerError, "no se pudo guardar el mensaje en la base de datos: "+err.Error())
 		return
 	}
 	single.ID = id
+
+	if waSendErr != nil {
+		if waSendErr == sql.ErrConnDone {
+			auth.WriteJSONError(w, http.StatusServiceUnavailable, "El mensaje se guardó en el historial como Fallido porque WhatsApp está desconectado. Vincula tu cuenta en Sesiones WhatsApp.")
+			return
+		}
+		auth.WriteJSONError(w, http.StatusBadGateway, "No se pudo entregar por WhatsApp ("+waSendErr.Error()+"). Registrado en historial como Fallido.")
+		return
+	}
 
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(http.StatusCreated)
@@ -341,6 +393,35 @@ func (h *DifusionMensajesHandler) Update(w http.ResponseWriter, r *http.Request,
 		return
 	}
 
+	// Verificar estado anterior por si un mensaje Programado o En Cola (Difusión) pasa a Enviado ahora
+	var prevEstado, adjNombre, adjMime, adjData string
+	_ = h.DB.QueryRowContext(r.Context(), `
+		SELECT COALESCE(estado, ''), COALESCE(adjunto_nombre, ''), COALESCE(adjunto_mime, ''), COALESCE(adjunto_data, '')
+		FROM mensajes_historial
+		WHERE id = ? AND deleted_at IS NULL
+	`, id).Scan(&prevEstado, &adjNombre, &adjMime, &adjData)
+
+	var waSendErr error
+	if prevEstado != "Enviado" && payload.Estado == "Enviado" {
+		if h.WA == nil || !h.WA.IsConnected() {
+			payload.Estado = "Fallido"
+			waSendErr = sql.ErrConnDone
+		} else {
+			mediaData := payload.AdjuntoData
+			mediaMime := payload.AdjuntoMime
+			mediaName := payload.AdjuntoNombre
+			if mediaData == "" {
+				mediaData = adjData
+				mediaMime = adjMime
+				mediaName = adjNombre
+			}
+			if err := h.WA.SendMessage(payload.TelefonoDestinatario, payload.Contenido, mediaData, mediaMime, mediaName); err != nil {
+				payload.Estado = "Fallido"
+				waSendErr = err
+			}
+		}
+	}
+
 	_, err := h.DB.ExecContext(r.Context(), `
 		UPDATE mensajes_historial SET
 			nombre_destinatario = ?, telefono_destinatario = ?, contenido = ?, estado = ?
@@ -348,6 +429,15 @@ func (h *DifusionMensajesHandler) Update(w http.ResponseWriter, r *http.Request,
 	`, payload.NombreDestinatario, payload.TelefonoDestinatario, payload.Contenido, payload.Estado, id)
 	if err != nil {
 		auth.WriteJSONError(w, http.StatusInternalServerError, "no se pudo actualizar el registro del mensaje")
+		return
+	}
+
+	if waSendErr != nil {
+		if waSendErr == sql.ErrConnDone {
+			auth.WriteJSONError(w, http.StatusServiceUnavailable, "WhatsApp desconectado al intentar enviar mensaje en cola/programado.")
+			return
+		}
+		auth.WriteJSONError(w, http.StatusBadGateway, "Error enviando por WhatsApp: "+waSendErr.Error())
 		return
 	}
 

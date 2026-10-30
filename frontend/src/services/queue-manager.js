@@ -4,6 +4,17 @@ import { toast } from '../components/toast.js';
 const listeners = new Set();
 
 const queueState = {
+  // Estado en tiempo real de la sesión de WhatsApp Web en segundo plano
+  whatsapp: {
+    status: 'DISCONNECTED', // DISCONNECTED | STOPPED | RESTARTING | INITIALIZING | QR_READY | AUTHENTICATED | CONNECTED
+    connected: false,
+    restartStartedAt: null,
+    restartElapsedSeconds: 0,
+    qrDataUrl: '',
+    qrUpdatedAt: null,
+    account: null,
+    lastError: '',
+  },
   // Estado de campaña de Difusión en segundo plano
   broadcast: {
     active: false,
@@ -21,7 +32,9 @@ const queueState = {
 };
 
 let tickerId = null;
+let tickCounter = 0;
 let initializedFromDB = false;
+let isPollingWA = false;
 
 function notify() {
   const snapshot = getQueueSnapshot();
@@ -55,6 +68,10 @@ export function getQueueSnapshot() {
   const pct = b.total > 0 ? Math.min(100, Math.round((b.sent / b.total) * 100)) : 0;
 
   return {
+    whatsapp: {
+      ...queueState.whatsapp,
+      account: queueState.whatsapp.account ? { ...queueState.whatsapp.account } : null,
+    },
     broadcast: {
       ...b,
       progressPercent: pct,
@@ -67,9 +84,117 @@ export function subscribeQueue(listenerFn) {
   listeners.add(listenerFn);
   listenerFn(getQueueSnapshot());
   ensureTickerRunning();
+  refreshWhatsAppStatus();
   return () => {
     listeners.delete(listenerFn);
   };
+}
+
+function applyWhatsAppState(res) {
+  if (!res || typeof res !== 'object') return false;
+  const nextStatus = res.status || 'DISCONNECTED';
+  const nextConnected = Boolean(res.connected || nextStatus === 'CONNECTED');
+  const nextQr = res.qrDataUrl || '';
+  const nextErr = res.lastError || '';
+  const nextAcc = res.account || null;
+  const nextRestartAt = res.restartStartedAt || null;
+
+  let elapsedSecs = queueState.whatsapp.restartElapsedSeconds || 0;
+  if (nextStatus === 'RESTARTING') {
+    if (nextRestartAt) {
+      const startMs = new Date(nextRestartAt).getTime();
+      if (!Number.isNaN(startMs)) {
+        elapsedSecs = Math.max(elapsedSecs, Math.max(1, Math.floor((Date.now() - startMs) / 1000)));
+      }
+    }
+  } else {
+    elapsedSecs = 0;
+  }
+
+  const prev = queueState.whatsapp;
+  const prevAccJson = JSON.stringify(prev.account);
+  const nextAccJson = JSON.stringify(nextAcc);
+
+  const hasChanged =
+    prev.status !== nextStatus ||
+    prev.connected !== nextConnected ||
+    prev.qrDataUrl !== nextQr ||
+    prev.lastError !== nextErr ||
+    prev.restartElapsedSeconds !== elapsedSecs ||
+    prevAccJson !== nextAccJson;
+
+  queueState.whatsapp = {
+    status: nextStatus,
+    connected: nextConnected,
+    restartStartedAt: nextRestartAt,
+    restartElapsedSeconds: elapsedSecs,
+    qrDataUrl: nextQr,
+    qrUpdatedAt: res.qrUpdatedAt || null,
+    account: nextAcc,
+    lastError: nextErr,
+  };
+
+  if (hasChanged) {
+    notify();
+  }
+  return hasChanged;
+}
+
+export async function refreshWhatsAppStatus() {
+  if (isPollingWA) return queueState.whatsapp;
+  isPollingWA = true;
+  try {
+    const res = await apiFetch('/api/whatsapp/status');
+    applyWhatsAppState(res);
+  } catch (_) {
+    // Ignorar error puntual de red
+  } finally {
+    isPollingWA = false;
+  }
+  return queueState.whatsapp;
+}
+
+export async function startWhatsAppSession() {
+  queueState.whatsapp.status = 'INITIALIZING';
+  queueState.whatsapp.connected = false;
+  queueState.whatsapp.restartElapsedSeconds = 0;
+  notify();
+  const res = await apiFetch('/api/whatsapp/start', { method: 'POST' });
+  applyWhatsAppState(res);
+  return res;
+}
+
+export async function restartWhatsAppSession() {
+  queueState.whatsapp.status = 'RESTARTING';
+  queueState.whatsapp.connected = false;
+  queueState.whatsapp.restartStartedAt = new Date().toISOString();
+  queueState.whatsapp.restartElapsedSeconds = 1;
+  ensureTickerRunning();
+  notify();
+  const res = await apiFetch('/api/whatsapp/restart', { method: 'POST' });
+  applyWhatsAppState(res);
+  return res;
+}
+
+export async function stopWhatsAppSession() {
+  queueState.whatsapp.status = 'STOPPED';
+  queueState.whatsapp.connected = false;
+  queueState.whatsapp.restartElapsedSeconds = 0;
+  notify();
+  const res = await apiFetch('/api/whatsapp/stop', { method: 'POST' });
+  applyWhatsAppState(res);
+  return res;
+}
+
+export async function deleteWhatsAppSession() {
+  queueState.whatsapp.status = 'INITIALIZING';
+  queueState.whatsapp.connected = false;
+  queueState.whatsapp.account = null;
+  queueState.whatsapp.restartElapsedSeconds = 0;
+  notify();
+  const res = await apiFetch('/api/whatsapp/delete-session', { method: 'POST' });
+  applyWhatsAppState(res);
+  return res;
 }
 
 export function setPreferredBroadcastTab(tabId) {
@@ -128,10 +253,6 @@ export async function syncPendingTasksFromDB() {
   }
 }
 
-/**
- * Inicia una campaña de difusión masiva en segundo plano.
- * Guarda inmediatamente todos los registros en la base de datos sin excepción y va procesando el conteo con barra de progreso.
- */
 export async function startBroadcastJob({ items = [], intervalSeconds = 30 } = {}) {
   if (!Array.isArray(items) || items.length === 0) {
     throw new Error('No hay destinatarios para iniciar la difusión.');
@@ -139,7 +260,6 @@ export async function startBroadcastJob({ items = [], intervalSeconds = 30 } = {
 
   const safeInterval = Math.max(1, Number(intervalSeconds) || 30);
 
-  // El primer mensaje se marca como Enviado de inmediato y el resto queda En Cola mientras avanza la difusión
   const payloadItems = items.map((item, idx) => ({
     ...item,
     tipo: 'Difusión',
@@ -199,10 +319,6 @@ export function clearCompletedBroadcastBanner() {
   }
 }
 
-/**
- * Registra un mensaje programado en segundo plano para mostrar la cuenta regresiva en vivo
- * tanto en el módulo como en la barra superior de todo el sistema.
- */
 export async function startScheduledMessageJob(payload, targetTimestampMs) {
   const saved = await apiFetch('/api/difusion-mensajes', {
     method: 'POST',
@@ -242,6 +358,18 @@ export async function startScheduledMessageJob(payload, targetTimestampMs) {
 
 async function processTick() {
   let changed = false;
+  tickCounter += 1;
+
+  // Si está en modo RESTARTING o INITIALIZING, actualizar el timer cada segundo y consultar estado cada segundo
+  if (queueState.whatsapp.status === 'RESTARTING') {
+    queueState.whatsapp.restartElapsedSeconds = (queueState.whatsapp.restartElapsedSeconds || 0) + 1;
+    changed = true;
+    refreshWhatsAppStatus();
+  } else if (queueState.whatsapp.status === 'INITIALIZING' || queueState.whatsapp.status === 'AUTHENTICATED') {
+    refreshWhatsAppStatus();
+  } else if (tickCounter % 3 === 0) {
+    refreshWhatsAppStatus();
+  }
 
   // 1. Procesar Difusión Masiva activa en segundo plano
   const b = queueState.broadcast;
@@ -268,6 +396,9 @@ async function processTick() {
                 nombreDestinatario: nextItem.nombreDestinatario || '—',
                 telefonoDestinatario: nextItem.telefonoDestinatario || '',
                 contenido: nextItem.contenido || '',
+                adjuntoNombre: nextItem.adjuntoNombre || '',
+                adjuntoMime: nextItem.adjuntoMime || '',
+                adjuntoData: nextItem.adjuntoData || '',
                 estado: 'Enviado',
               }),
             });
@@ -306,7 +437,6 @@ async function processTick() {
       changed = true;
 
       if (remSecs <= 0) {
-        // Enviar automáticamente y actualizar estado en BD a "Enviado"
         if (item.id) {
           try {
             await apiFetch(`/api/difusion-mensajes/${item.id}`, {
@@ -346,4 +476,3 @@ function ensureTickerRunning() {
     processTick();
   }, 1000);
 }
-

@@ -2,18 +2,19 @@ import { createButton } from '../components/button.js';
 import { createThemeToggle, getBrandLogoUrl } from '../components/theme.js';
 import { toast } from '../components/toast.js';
 import { apiFetch } from '../services/api.js';
-import { renderClientesModule } from './clientes.js?v=20261029_5';
-import { renderProveedoresModule } from './proveedores.js?v=20261029_5';
-import { renderPerfilesMensajesModule } from './perfiles-mensajes.js?v=20261029_5';
-import { renderDifusionMensajesModule } from './difusion-mensajes.js?v=20261029_5';
-import { renderReciclajeModule } from './reciclaje.js?v=20261029_5';
+import { renderClientesModule } from './clientes.js?v=20261029_9';
+import { renderProveedoresModule } from './proveedores.js?v=20261029_9';
+import { renderPerfilesMensajesModule } from './perfiles-mensajes.js?v=20261029_9';
+import { renderSesionesWhatsAppModule } from './sesiones-whatsapp.js?v=20261029_9';
+import { renderDifusionMensajesModule } from './difusion-mensajes.js?v=20261029_9';
+import { renderReciclajeModule } from './reciclaje.js?v=20261029_9';
 import {
   subscribeQueue,
   formatRemainingDuration,
   syncPendingTasksFromDB,
   setPreferredBroadcastTab,
   clearCompletedBroadcastBanner,
-} from '../services/queue-manager.js?v=20261029_5';
+} from '../services/queue-manager.js?v=20261029_9';
 
 export const MENU_MODULES = [
   { id: 'dashboard', label: 'Panel General', icon: 'fa-solid fa-table-cells-large', roles: ['admin', 'editor', 'viewer'] },
@@ -198,24 +199,65 @@ export function renderDashboardLayout(container, { user, activeModule = 'dashboa
 
   const statusBadge = document.createElement('button');
   statusBadge.type = 'button';
-  statusBadge.className =
-    'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200/80 dark:border-emerald-800/60 hover:bg-emerald-100/70 dark:hover:bg-emerald-900/50 transition-colors shrink-0 cursor-pointer';
-  statusBadge.innerHTML = `
-    <span class="relative flex h-2 w-2">
-      <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-      <span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-    </span>
-    <i class="fa-brands fa-whatsapp text-emerald-600 dark:text-emerald-400 text-xs" aria-hidden="true"></i>
-    <span class="hidden sm:inline">WhatsApp Online</span>
-    <span class="sm:hidden">Online</span>
-  `;
+  statusBadge.title = 'Ir a Sesiones de WhatsApp';
+
+  function updateHeaderWhatsAppBadge(waState) {
+    const wa = waState || { status: 'DISCONNECTED', connected: false, account: null, restartElapsedSeconds: 0 };
+    const isConnected = Boolean(wa.connected || wa.status === 'CONNECTED');
+    const isStopped = wa.status === 'STOPPED';
+    const isRestarting = wa.status === 'RESTARTING';
+
+    if (isConnected) {
+      const phoneLabel = wa.account && wa.account.phone ? ` (+${wa.account.phone})` : '';
+      statusBadge.title = `WhatsApp Online${phoneLabel} · Clic para ver detalles de la sesión`;
+      statusBadge.className =
+        'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200/80 dark:border-emerald-800/60 hover:bg-emerald-100/70 dark:hover:bg-emerald-900/50 transition-colors shrink-0 cursor-pointer';
+      statusBadge.innerHTML = `
+        <span class="relative flex h-2 w-2">
+          <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+          <span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+        </span>
+        <span>Online</span>
+      `;
+    } else if (isRestarting) {
+      const secs = Math.max(1, Number(wa.restartElapsedSeconds) || 1);
+      const padSecs = String(secs).padStart(2, '0');
+      statusBadge.title = 'Reiniciando sesión de WhatsApp en segundo plano...';
+      statusBadge.className =
+        'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-brand-soft dark:bg-brand/20 text-brand border border-brand/30 hover:bg-brand-soft/80 transition-colors shrink-0 cursor-pointer';
+      statusBadge.innerHTML = `
+        <i class="fa-solid fa-arrows-rotate fa-spin text-[10px]"></i>
+        <span>Reiniciando · ${padSecs}s</span>
+      `;
+    } else if (isStopped) {
+      statusBadge.title = 'Sesión de WhatsApp detenida · Clic para iniciar o gestionar sesión';
+      statusBadge.className =
+        'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border border-rose-200/80 dark:border-rose-800/60 hover:bg-rose-100/70 dark:hover:bg-rose-900/50 transition-colors shrink-0 cursor-pointer';
+      statusBadge.innerHTML = `
+        <span class="w-2 h-2 rounded-full bg-rose-500"></span>
+        <span>Detenido</span>
+      `;
+    } else {
+      statusBadge.title = 'Cuenta de WhatsApp desconectada · Clic para vincular por QR';
+      statusBadge.className =
+        'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border border-amber-200/80 dark:border-amber-800/60 hover:bg-amber-100/70 dark:hover:bg-amber-900/50 transition-colors shrink-0 cursor-pointer';
+      statusBadge.innerHTML = `
+        <span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
+        <span class="hidden sm:inline">Desconectado · Iniciar sesión</span>
+        <span class="sm:hidden">Desconectado</span>
+      `;
+    }
+  }
+
+  updateHeaderWhatsAppBadge(null);
+
   statusBadge.addEventListener('click', () => {
     if (typeof onNavigate === 'function') {
       onNavigate('sessions');
     }
   });
 
-  // Indicadores en vivo en la parte superior al lado del estado Online de WhatsApp:
+  // Indicadores en vivo en la parte superior al lado del estado de WhatsApp:
   // 1) Progreso de Difusión en curso (conteo de enviados + barra de progreso)
   // 2) Cuenta regresiva de Mensaje Programado (tiempo que falta + barra de progreso)
   const headerQueueBox = document.createElement('div');
@@ -224,6 +266,7 @@ export function renderDashboardLayout(container, { user, activeModule = 'dashboa
   syncPendingTasksFromDB();
 
   subscribeQueue((snap) => {
+    updateHeaderWhatsAppBadge(snap.whatsapp);
     headerQueueBox.innerHTML = '';
 
     // Píldora de Difusión Masiva en curso o recién completada
@@ -348,6 +391,8 @@ export function renderDashboardLayout(container, { user, activeModule = 'dashboa
       renderProveedoresModule(mainArea);
     } else if (currentMod.id === 'mensajes') {
       renderPerfilesMensajesModule(mainArea);
+    } else if (currentMod.id === 'sessions') {
+      renderSesionesWhatsAppModule(mainArea);
     } else if (currentMod.id === 'broadcast') {
       renderDifusionMensajesModule(mainArea);
     } else if (currentMod.id === 'reciclaje') {

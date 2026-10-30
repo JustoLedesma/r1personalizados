@@ -38,7 +38,8 @@ func Run() {
 	clientesHandler := handlers.NewClientesHandler(dbConn)
 	proveedoresHandler := handlers.NewProveedoresHandler(dbConn)
 	perfilesMensajesHandler := handlers.NewPerfilesMensajesHandler(dbConn)
-	difusionMensajesHandler := handlers.NewDifusionMensajesHandler(dbConn)
+	whatsappHandler := handlers.NewWhatsAppHandler()
+	difusionMensajesHandler := handlers.NewDifusionMensajesHandler(dbConn, whatsappHandler)
 	reciclajeHandler := handlers.NewReciclajeHandler(dbConn)
 
 	mux := http.NewServeMux()
@@ -67,6 +68,14 @@ func Run() {
 	// Rutas del módulo Difusión y Mensajes
 	mux.HandleFunc("/api/difusion-mensajes", difusionMensajesHandler.HandleCollection)
 	mux.HandleFunc("/api/difusion-mensajes/", difusionMensajesHandler.HandleItem)
+
+	// Rutas del módulo Sesiones de WhatsApp (navegador headless en segundo plano)
+	mux.HandleFunc("/api/whatsapp/status", whatsappHandler.Status)
+	mux.HandleFunc("/api/whatsapp/start", whatsappHandler.Start)
+	mux.HandleFunc("/api/whatsapp/restart", whatsappHandler.Restart)
+	mux.HandleFunc("/api/whatsapp/stop", whatsappHandler.Stop)
+	mux.HandleFunc("/api/whatsapp/delete-session", whatsappHandler.DeleteSession)
+	mux.HandleFunc("/api/whatsapp/send", whatsappHandler.Send)
 
 	// Rutas del módulo Reciclaje
 	mux.HandleFunc("/api/reciclaje", reciclajeHandler.List)

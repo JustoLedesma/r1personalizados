@@ -1,12 +1,12 @@
 import { createButton } from '../components/button.js';
 import { createDataTable } from '../components/table.js';
 import { openModal, openConfirmModal } from '../components/modal.js';
-import { createPhoneInput } from '../components/phone-input.js?v=20261029_5';
+import { createPhoneInput } from '../components/phone-input.js?v=20261029_8';
 import {
   createMediaAttachmentInput,
   renderMediaPreviewCard,
   openImageZoomModal,
-} from '../components/media-attachment.js?v=20261029_5';
+} from '../components/media-attachment.js?v=20261029_8';
 import { toast } from '../components/toast.js';
 import { apiFetch } from '../services/api.js';
 import {
@@ -16,7 +16,7 @@ import {
   formatRemainingDuration,
   consumePreferredBroadcastTab,
   clearCompletedBroadcastBanner,
-} from '../services/queue-manager.js';
+} from '../services/queue-manager.js?v=20261029_8';
 
 const QUICK_EMOJIS = ['👋', '😊', '✨', '🎉', '👍', '💼', '💰', '🗓️'];
 

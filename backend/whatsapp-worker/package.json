@@ -1,0 +1,11 @@
+{
+  "name": "r1-whatsapp-worker",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Worker de navegador en segundo plano para WhatsApp Web (QR y envío de mensajes, imágenes y PDF)",
+  "dependencies": {
+    "qrcode": "^1.5.4",
+    "whatsapp-web.js": "^1.26.0"
+  }
+}
+

@@ -5,6 +5,11 @@ backend/.env
 # Dependencias y binarios
 node_modules/
 frontend/node_modules/
+backend/whatsapp-worker/node_modules/
+backend/whatsapp-worker/.wwebjs_auth/
+backend/whatsapp-worker/.wwebjs_cache/
+.wwebjs_auth/
+.wwebjs_cache/
 backend/server.exe
 backend/server
 *.exe
