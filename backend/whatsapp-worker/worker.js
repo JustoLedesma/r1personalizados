@@ -82,8 +82,9 @@ async function fetchImageAsDataUrl(url) {
  */
 async function ensureWWebJSPatched() {
   if (!client || !client.pupPage) return;
-  try {
-    await client.pupPage.evaluate(() => {
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      await client.pupPage.evaluate(() => {
       if (!window.WWebJS) return;
 
       window.WWebJS.processMediaData = async (
@@ -235,9 +236,17 @@ async function ensureWWebJSPatched() {
           : chat;
       };
     });
+    return;
   } catch (err) {
+    if (err.message && (err.message.includes('detached Frame') || err.message.includes('Execution context was destroyed'))) {
+      console.log(`[WA-WORKER] Frame detached detectado al aplicar parche (intento ${attempt}/3). Esperando 1s...`);
+      await new Promise((r) => setTimeout(r, 1000));
+      continue;
+    }
     console.error('[WA-WORKER] Error aplicando parche WWebJS:', err.message || err);
+    break;
   }
+}
 }
 
 async function populateAccountInfo() {
@@ -430,7 +439,9 @@ async function startClient({ asRestart = false } = {}) {
       '--disable-accelerated-2d-canvas',
       '--no-first-run',
       '--no-zygote',
-      '--disable-gpu'
+      '--disable-gpu',
+      '--disable-features=IsolateOrigins,site-per-process',
+      '--disable-site-isolation-trials'
     ]
   };
   if (executablePath) {
@@ -690,10 +701,17 @@ async function sendWhatsAppMessage(payload) {
     throw new Error('Debes indicar un mensaje de texto o un archivo adjunto.');
   }
 
-  await ensureWWebJSPatched();
-
-  const targetChatId = await resolveTargetChatId(digits);
   const fallbackChatId = `${digits}@c.us`;
+  let targetChatId = fallbackChatId;
+
+  try {
+    targetChatId = await resolveTargetChatId(digits);
+  } catch (idErr) {
+    if (idErr.message && idErr.message.includes('no está registrado')) {
+      throw idErr;
+    }
+    targetChatId = fallbackChatId;
+  }
 
   let sentMsg = null;
   const baseSendOptions = {
@@ -702,40 +720,73 @@ async function sendWhatsAppMessage(payload) {
     linkPreview: false
   };
 
-  if (mediaObj && mediaObj.data) {
-    const parsed = parseDataUrl(mediaObj.data, mediaObj.mime);
-    if (!parsed || !parsed.base64) {
-      throw new Error('El archivo adjunto no tiene un formato Base64 válido.');
+  const executeSend = async (chatId) => {
+    if (mediaObj && mediaObj.data) {
+      const parsed = parseDataUrl(mediaObj.data, mediaObj.mime);
+      if (!parsed || !parsed.base64) {
+        throw new Error('El archivo adjunto no tiene un formato Base64 válido.');
+      }
+      const filename = mediaObj.filename || 'adjunto';
+      const media = new MessageMedia(parsed.mime, parsed.base64, filename);
+      const sendOptions = { ...baseSendOptions };
+      if (text) {
+        sendOptions.caption = text;
+      }
+      if (parsed.mime === 'application/pdf') {
+        sendOptions.sendMediaAsDocument = true;
+      }
+      return await client.sendMessage(chatId, media, sendOptions);
+    } else {
+      return await client.sendMessage(chatId, text, baseSendOptions);
     }
-    const filename = mediaObj.filename || 'adjunto';
-    const media = new MessageMedia(parsed.mime, parsed.base64, filename);
-    const sendOptions = { ...baseSendOptions };
-    if (text) {
-      sendOptions.caption = text;
-    }
-    if (parsed.mime === 'application/pdf') {
-      sendOptions.sendMediaAsDocument = true;
-    }
+  };
 
+  let lastErr = null;
+  for (let attempt = 1; attempt <= 3; attempt++) {
     try {
-      sentMsg = await client.sendMessage(targetChatId, media, sendOptions);
-    } catch (firstErr) {
+      await ensureWWebJSPatched();
+      sentMsg = await executeSend(targetChatId);
+      lastErr = null;
+      break;
+    } catch (err) {
+      lastErr = err;
+      console.log(`[WA-WORKER] Intento ${attempt} de envío a ${targetChatId} falló:`, err.message);
+
+      if (err.message && err.message.includes('no está registrado')) {
+        throw err;
+      }
+
+      if (
+        err.message &&
+        (err.message.includes('detached Frame') ||
+          err.message.includes('Execution context was destroyed') ||
+          err.message.includes('Session closed'))
+      ) {
+        console.log(`[WA-WORKER] Error transitorio de frame/contexto en WhatsApp Web. Esperando 1.5s antes del intento ${attempt + 1}...`);
+        await new Promise((r) => setTimeout(r, 1500));
+        continue;
+      }
+
+      // Probar con fallbackChatId si targetChatId falló
       if (targetChatId !== fallbackChatId) {
-        sentMsg = await client.sendMessage(fallbackChatId, media, sendOptions);
-      } else {
-        throw firstErr;
+        try {
+          sentMsg = await executeSend(fallbackChatId);
+          targetChatId = fallbackChatId;
+          lastErr = null;
+          break;
+        } catch (fbErr) {
+          lastErr = fbErr;
+        }
+      }
+
+      if (attempt < 3) {
+        await new Promise((r) => setTimeout(r, 1000));
       }
     }
-  } else {
-    try {
-      sentMsg = await client.sendMessage(targetChatId, text, baseSendOptions);
-    } catch (firstErr) {
-      if (targetChatId !== fallbackChatId) {
-        sentMsg = await client.sendMessage(fallbackChatId, text, baseSendOptions);
-      } else {
-        throw firstErr;
-      }
-    }
+  }
+
+  if (lastErr) {
+    throw lastErr;
   }
 
   if (state.account) {

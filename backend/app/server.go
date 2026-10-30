@@ -41,6 +41,7 @@ func Run() {
 	whatsappHandler := handlers.NewWhatsAppHandler()
 	difusionMensajesHandler := handlers.NewDifusionMensajesHandler(dbConn, whatsappHandler)
 	reciclajeHandler := handlers.NewReciclajeHandler(dbConn)
+	configuracionHandler := handlers.NewConfiguracionHandler(dbConn)
 
 	mux := http.NewServeMux()
 
@@ -80,6 +81,17 @@ func Run() {
 	// Rutas del módulo Reciclaje
 	mux.HandleFunc("/api/reciclaje", reciclajeHandler.List)
 	mux.HandleFunc("/api/reciclaje/restaurar", reciclajeHandler.Restore)
+
+	// Rutas del módulo Configuración (WhatsApp, Pedidos, Productos, Perfil, General)
+	mux.HandleFunc("/api/configuracion", configuracionHandler.HandleConfig)
+	mux.HandleFunc("/api/configuracion/perfil", configuracionHandler.HandlePerfil)
+	mux.HandleFunc("/api/configuracion/atributos", configuracionHandler.ListAtributos)
+	mux.HandleFunc("/api/configuracion/categorias", configuracionHandler.HandleCategorias)
+	mux.HandleFunc("/api/configuracion/categorias/", configuracionHandler.HandleCategorias)
+	mux.HandleFunc("/api/configuracion/marcas", configuracionHandler.HandleMarcas)
+	mux.HandleFunc("/api/configuracion/marcas/", configuracionHandler.HandleMarcas)
+	mux.HandleFunc("/api/configuracion/unidades", configuracionHandler.HandleUnidades)
+	mux.HandleFunc("/api/configuracion/unidades/", configuracionHandler.HandleUnidades)
 
 	frontendDir := resolveDir("frontend", "../frontend")
 	logoDir := resolveDir("logo", "../logo", "frontend/logo")

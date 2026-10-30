@@ -1,5 +1,5 @@
-import { renderLoginPage } from './pages/login.js?v=20261030_2';
-import { renderDashboardLayout, MENU_MODULES } from './pages/dashboard.js?v=20261030_2';
+import { renderLoginPage } from './pages/login.js?v=20261030_5';
+import { renderDashboardLayout, MENU_MODULES } from './pages/dashboard.js?v=20261030_5';
 
 const SESSION_STORAGE_KEY = 'r1_session_user';
 
@@ -87,5 +87,9 @@ function initApp() {
   renderCurrentRoute();
 }
 
-document.addEventListener('DOMContentLoaded', initApp);
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initApp);
+} else {
+  initApp();
+}
 

@@ -187,3 +187,86 @@ CREATE TABLE IF NOT EXISTS `mensajes_historial` (
   INDEX `idx_mensajes_historial_estado` (`estado`),
   INDEX `idx_mensajes_historial_deleted_at` (`deleted_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ============================================================================
+-- Módulo: Configuración del Sistema (WhatsApp, Pedidos, Empresa, Atributos de Productos)
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS `configuraciones` (
+  `clave` VARCHAR(80) PRIMARY KEY,
+  `valor` LONGTEXT NOT NULL,
+  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT IGNORE INTO `configuraciones` (`clave`, `valor`) VALUES
+  ('whatsapp_nombre_formato', '{"incluir_nombre":true,"incluir_apellido":true}'),
+  ('pedidos_notificaciones', '{"notificar_automatico":false,"plantilla_retiro_id":null,"plantilla_envio_id":1,"plantilla_presupuesto_id":null}'),
+  ('empresa_datos', '{"logo_url":"./logo/r1.png","razon_social":"NETZ - R1 Personalizados","ruc":"00012345-0","propietario":"Juan Pérez","email":"contacto@netz.com.py","telefonos":["+595 981 123456"],"direccion":"Asunción, Paraguay","horario_atencion":"Lunes a Viernes de 08:00 a 18:00 hs - Sábados de 08:00 a 12:00 hs","gps_enlace":"https://maps.google.com/?q=-25.285,-57.6470","redes":{"facebook":"https://facebook.com/r1personalizados","instagram":"https://instagram.com/r1personalizados","tiktok":"https://tiktok.com/@r1personalizados","sitio_web":"https://netz.com.py"}}');
+
+-- Pestaña Productos: Categorías
+CREATE TABLE IF NOT EXISTS `categorias_productos` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `nombre` VARCHAR(120) NOT NULL,
+  `activo` TINYINT(1) NOT NULL DEFAULT 1,
+  `deleted_at` DATETIME NULL DEFAULT NULL,
+  `deleted_by` VARCHAR(150) NULL DEFAULT NULL,
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX `idx_categorias_activo` (`activo`),
+  INDEX `idx_categorias_deleted_at` (`deleted_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT IGNORE INTO `categorias_productos` (`id`, `nombre`, `activo`) VALUES
+  (1, 'General', 1),
+  (2, 'Electrónica', 1),
+  (3, 'Indumentaria', 1),
+  (4, 'Bazar y Hogar', 1),
+  (5, 'Servicios', 1);
+
+-- Pestaña Productos: Marcas
+CREATE TABLE IF NOT EXISTS `marcas_productos` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `nombre` VARCHAR(120) NOT NULL,
+  `activo` TINYINT(1) NOT NULL DEFAULT 1,
+  `deleted_at` DATETIME NULL DEFAULT NULL,
+  `deleted_by` VARCHAR(150) NULL DEFAULT NULL,
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX `idx_marcas_activo` (`activo`),
+  INDEX `idx_marcas_deleted_at` (`deleted_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT IGNORE INTO `marcas_productos` (`id`, `nombre`, `activo`) VALUES
+  (1, 'Genérica / Sin marca', 1),
+  (2, 'NETZ', 1),
+  (3, 'Sublimados R1', 1);
+
+-- Pestaña Productos: Unidades de Medida
+CREATE TABLE IF NOT EXISTS `unidades_medida` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `nombre` VARCHAR(120) NOT NULL,
+  `abreviatura` VARCHAR(30) NOT NULL,
+  `permite_decimales` TINYINT(1) NOT NULL DEFAULT 0,
+  `activo` TINYINT(1) NOT NULL DEFAULT 1,
+  `deleted_at` DATETIME NULL DEFAULT NULL,
+  `deleted_by` VARCHAR(150) NULL DEFAULT NULL,
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX `idx_unidades_activo` (`activo`),
+  INDEX `idx_unidades_deleted_at` (`deleted_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT IGNORE INTO `unidades_medida` (`id`, `nombre`, `abreviatura`, `permite_decimales`, `activo`) VALUES
+  (1, 'Unidad', 'un.', 0, 1),
+  (2, 'Par', 'par', 0, 1),
+  (3, 'Docena', 'doc.', 0, 1),
+  (4, 'Caja', 'caja', 0, 1),
+  (5, 'Paquete', 'paq.', 0, 1),
+  (6, 'Kilogramo', 'kg', 1, 1),
+  (7, 'Metro', 'm', 1, 1),
+  (8, 'Litro', 'l', 1, 1);
+
+-- Campos de perfil en tabla users
+-- ALTER TABLE `users` ADD COLUMN `fecha_nacimiento` DATE NULL;
+-- ALTER TABLE `users` ADD COLUMN `foto_perfil` LONGTEXT NULL;
+-- ALTER TABLE `users` ADD COLUMN `auto_logout_minutes` INT NOT NULL DEFAULT 0;
+

@@ -2,19 +2,20 @@ import { createButton } from '../components/button.js';
 import { createThemeToggle, getBrandLogoUrl } from '../components/theme.js';
 import { toast } from '../components/toast.js';
 import { apiFetch } from '../services/api.js';
-import { renderClientesModule } from './clientes.js?v=20261030_2';
-import { renderProveedoresModule } from './proveedores.js?v=20261030_2';
-import { renderPerfilesMensajesModule } from './perfiles-mensajes.js?v=20261030_2';
-import { renderSesionesWhatsAppModule } from './sesiones-whatsapp.js?v=20261030_2';
-import { renderDifusionMensajesModule } from './difusion-mensajes.js?v=20261030_2';
-import { renderReciclajeModule } from './reciclaje.js?v=20261030_2';
+import { renderClientesModule } from './clientes.js?v=20261030_5';
+import { renderProveedoresModule } from './proveedores.js?v=20261030_5';
+import { renderPerfilesMensajesModule } from './perfiles-mensajes.js?v=20261030_5';
+import { renderSesionesWhatsAppModule } from './sesiones-whatsapp.js?v=20261030_5';
+import { renderDifusionMensajesModule } from './difusion-mensajes.js?v=20261030_5';
+import { renderReciclajeModule } from './reciclaje.js?v=20261030_5';
+import { renderConfiguracionModule } from './configuracion.js?v=20261030_5';
 import {
   subscribeQueue,
   formatRemainingDuration,
   syncPendingTasksFromDB,
   setPreferredBroadcastTab,
   clearCompletedBroadcastBanner,
-} from '../services/queue-manager.js?v=20261030_2';
+} from '../services/queue-manager.js?v=20261030_5';
 
 export const MENU_MODULES = [
   { id: 'dashboard', label: 'Panel General', icon: 'fa-solid fa-table-cells-large', roles: ['admin', 'editor', 'viewer'] },
@@ -417,11 +418,108 @@ export function renderDashboardLayout(container, { user, activeModule = 'dashboa
       renderDifusionMensajesModule(mainArea);
     } else if (currentMod.id === 'reciclaje') {
       renderReciclajeModule(mainArea);
+    } else if (currentMod.id === 'configuracion') {
+      renderConfiguracionModule(mainArea);
+    } else if (currentMod.id === 'dashboard') {
+      renderDashboardSummary(mainArea, onNavigate);
+    } else {
+      renderModulePlaceholder(mainArea, currentMod);
     }
   } catch (err) {
     console.error('[Error renderizando módulo]', err);
+    mainArea.innerHTML = `
+      <div class="p-6 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800 rounded-2xl text-red-600 dark:text-red-400">
+        <p class="font-bold">Error al cargar el módulo ${currentMod.label}:</p>
+        <p class="text-xs font-mono mt-1">${err.message || String(err)}</p>
+      </div>
+    `;
   }
 
   return { mainArea };
+}
+
+function renderDashboardSummary(container, onNavigate) {
+  const wrap = document.createElement('div');
+  wrap.className = 'w-full space-y-6';
+  wrap.innerHTML = `
+    <div class="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl p-6 shadow-xs flex flex-wrap items-center justify-between gap-4">
+      <div>
+        <h1 class="text-xl sm:text-2xl font-black text-slate-900 dark:text-white">Panel General — R1 Personalizados</h1>
+        <p class="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-1">
+          Bienvenido al sistema. Seleccione un módulo en el menú lateral o utilice los accesos rápidos a continuación.
+        </p>
+      </div>
+      <div class="flex items-center gap-2">
+        <button type="button" id="dash-btn-wa" class="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold bg-brand text-white hover:bg-brand-hover active:bg-brand-active shadow-xs cursor-pointer">
+          <i class="fa-solid fa-bullhorn"></i>
+          <span>Difusión y Mensajes</span>
+        </button>
+        <button type="button" id="dash-btn-cfg" class="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:border-brand/40 cursor-pointer">
+          <i class="fa-solid fa-gear"></i>
+          <span>Configuración</span>
+        </button>
+      </div>
+    </div>
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div id="card-pedidos" class="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 hover:border-brand/40 transition shadow-xs cursor-pointer">
+        <div class="flex items-center gap-3">
+          <span class="w-10 h-10 rounded-xl bg-brand-soft dark:bg-brand/20 text-brand flex items-center justify-center text-lg">
+            <i class="fa-regular fa-clipboard"></i>
+          </span>
+          <div>
+            <h3 class="text-sm font-bold text-slate-800 dark:text-slate-100">Pedidos</h3>
+            <p class="text-xs text-slate-500 dark:text-slate-400">Gestión de órdenes y entregas</p>
+          </div>
+        </div>
+      </div>
+      <div id="card-clientes" class="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 hover:border-brand/40 transition shadow-xs cursor-pointer">
+        <div class="flex items-center gap-3">
+          <span class="w-10 h-10 rounded-xl bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400 flex items-center justify-center text-lg">
+            <i class="fa-solid fa-users"></i>
+          </span>
+          <div>
+            <h3 class="text-sm font-bold text-slate-800 dark:text-slate-100">Clientes</h3>
+            <p class="text-xs text-slate-500 dark:text-slate-400">Directorio y fichas de clientes</p>
+          </div>
+        </div>
+      </div>
+      <div id="card-sesiones" class="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 hover:border-brand/40 transition shadow-xs cursor-pointer">
+        <div class="flex items-center gap-3">
+          <span class="w-10 h-10 rounded-xl bg-purple-50 dark:bg-purple-950/50 text-brand flex items-center justify-center text-lg">
+            <i class="fa-solid fa-mobile-screen"></i>
+          </span>
+          <div>
+            <h3 class="text-sm font-bold text-slate-800 dark:text-slate-100">Sesiones WhatsApp</h3>
+            <p class="text-xs text-slate-500 dark:text-slate-400">Conexión de WhatsApp Web</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  wrap.querySelector('#dash-btn-wa')?.addEventListener('click', () => onNavigate?.('broadcast'));
+  wrap.querySelector('#dash-btn-cfg')?.addEventListener('click', () => onNavigate?.('configuracion'));
+  wrap.querySelector('#card-pedidos')?.addEventListener('click', () => onNavigate?.('pedidos'));
+  wrap.querySelector('#card-clientes')?.addEventListener('click', () => onNavigate?.('clientes'));
+  wrap.querySelector('#card-sesiones')?.addEventListener('click', () => onNavigate?.('sessions'));
+
+  container.appendChild(wrap);
+}
+
+function renderModulePlaceholder(container, mod) {
+  const wrap = document.createElement('div');
+  wrap.className = 'w-full bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl p-8 sm:p-12 text-center space-y-4 shadow-xs';
+  wrap.innerHTML = `
+    <div class="w-16 h-16 rounded-2xl bg-brand-soft dark:bg-brand/20 text-brand flex items-center justify-center mx-auto text-2xl">
+      <i class="${mod.icon || 'fa-solid fa-gear'}"></i>
+    </div>
+    <div class="space-y-1">
+      <h2 class="text-lg sm:text-xl font-black text-slate-900 dark:text-white">${mod.label}</h2>
+      <p class="text-xs sm:text-sm text-slate-500 dark:text-slate-400 max-w-md mx-auto">
+        Este módulo está preparado en la navegación del sistema.
+      </p>
+    </div>
+  `;
+  container.appendChild(wrap);
 }
 

@@ -1,6 +1,6 @@
 import { createButton } from '../components/button.js';
 import { openConfirmModal } from '../components/modal.js';
-import { openImageZoomModal } from '../components/media-attachment.js?v=20261029_8';
+import { openImageZoomModal } from '../components/media-attachment.js?v=20261030_5';
 import { toast } from '../components/toast.js';
 import {
   subscribeQueue,
@@ -9,7 +9,7 @@ import {
   restartWhatsAppSession,
   stopWhatsAppSession,
   deleteWhatsAppSession,
-} from '../services/queue-manager.js?v=20261029_8';
+} from '../services/queue-manager.js?v=20261030_5';
 
 function formatDateTime(isoStr) {
   if (!isoStr) return '—';
@@ -54,7 +54,7 @@ export function renderSesionesWhatsAppModule(container) {
         <i class="fa-brands fa-whatsapp text-base"></i>
       </span>
       <h2 class="text-sm sm:text-base font-bold text-slate-800 dark:text-slate-100">
-        Gestión de Sesión de WhatsApp Web (Segundo Plano)
+        Gestión de Sesión de WhatsApp Web
       </h2>
       <span data-role="top-status-pill"></span>
     </div>

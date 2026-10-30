@@ -384,91 +384,123 @@ export async function startScheduledMessageJob(payload, targetTimestampMs) {
   return saved;
 }
 
+let isTicking = false;
+
 async function processTick() {
-  let changed = false;
-  tickCounter += 1;
+  if (isTicking) return;
+  isTicking = true;
+  try {
+    let changed = false;
+    tickCounter += 1;
 
-  // Si está en modo RESTARTING o INITIALIZING, actualizar el timer cada segundo y consultar estado cada segundo
-  if (queueState.whatsapp.status === 'RESTARTING') {
-    queueState.whatsapp.restartElapsedSeconds = (queueState.whatsapp.restartElapsedSeconds || 0) + 1;
-    changed = true;
-    refreshWhatsAppStatus();
-  } else if (queueState.whatsapp.status === 'INITIALIZING' || queueState.whatsapp.status === 'AUTHENTICATED') {
-    refreshWhatsAppStatus();
-  } else if (tickCounter % 3 === 0) {
-    refreshWhatsAppStatus();
-  }
+    // Si está en modo RESTARTING o INITIALIZING, actualizar el timer cada segundo y consultar estado cada segundo
+    if (queueState.whatsapp.status === 'RESTARTING') {
+      queueState.whatsapp.restartElapsedSeconds = (queueState.whatsapp.restartElapsedSeconds || 0) + 1;
+      changed = true;
+      refreshWhatsAppStatus();
+    } else if (queueState.whatsapp.status === 'INITIALIZING' || queueState.whatsapp.status === 'AUTHENTICATED') {
+      refreshWhatsAppStatus();
+    } else if (tickCounter % 3 === 0) {
+      refreshWhatsAppStatus();
+    }
 
-  // 1. Procesar Difusión Masiva activa en segundo plano
-  const b = queueState.broadcast;
-  if (b.active && b.sent < b.total) {
-    b.secondsToNext = Math.max(0, b.secondsToNext - 1);
-    changed = true;
+    // 1. Procesar Difusión Masiva activa en segundo plano
+    const b = queueState.broadcast;
+    if (b.active && b.sent < b.total) {
+      b.secondsToNext = Math.max(0, b.secondsToNext - 1);
+      changed = true;
 
-    if (b.secondsToNext <= 0) {
-      const nextIndex = b.sent;
-      const nextItem = b.items[nextIndex];
-      b.sent += 1;
+      if (b.secondsToNext <= 0) {
+        const nextIndex = b.sent;
+        const nextItem = b.items[nextIndex];
+        b.sent += 1;
 
-      if (nextItem) {
-        b.currentRecipient =
-          nextItem.nombreDestinatario && nextItem.nombreDestinatario !== '—'
-            ? `${nextItem.nombreDestinatario} (${nextItem.telefonoDestinatario})`
-            : nextItem.telefonoDestinatario || `Destinatario #${b.sent}`;
+        if (nextItem) {
+          b.currentRecipient =
+            nextItem.nombreDestinatario && nextItem.nombreDestinatario !== '—'
+              ? `${nextItem.nombreDestinatario} (${nextItem.telefonoDestinatario})`
+              : nextItem.telefonoDestinatario || `Destinatario #${b.sent}`;
 
-        if (nextItem.id) {
-          try {
-            await apiFetch(`/api/difusion-mensajes/${nextItem.id}`, {
-              method: 'PUT',
-              body: JSON.stringify({
-                nombreDestinatario: nextItem.nombreDestinatario || '—',
-                telefonoDestinatario: nextItem.telefonoDestinatario || '',
-                contenido: nextItem.contenido || '',
-                adjuntoNombre: nextItem.adjuntoNombre || '',
-                adjuntoMime: nextItem.adjuntoMime || '',
-                adjuntoData: nextItem.adjuntoData || '',
-                estado: 'Enviado',
-              }),
-            });
-          } catch (err) {
-            const destLabel =
-              nextItem.nombreDestinatario && nextItem.nombreDestinatario !== '—'
-                ? `${nextItem.nombreDestinatario} (+${nextItem.telefonoDestinatario})`
-                : `+${nextItem.telefonoDestinatario}`;
-            toast.warning(`Aviso en difusión (${destLabel}): ${err.message || 'No se pudo entregar por WhatsApp (marcado como Fallido)'}`);
+          if (nextItem.id) {
+            try {
+              await apiFetch(`/api/difusion-mensajes/${nextItem.id}`, {
+                method: 'PUT',
+                body: JSON.stringify({
+                  nombreDestinatario: nextItem.nombreDestinatario || '—',
+                  telefonoDestinatario: nextItem.telefonoDestinatario || '',
+                  contenido: nextItem.contenido || '',
+                  adjuntoNombre: nextItem.adjuntoNombre || '',
+                  adjuntoMime: nextItem.adjuntoMime || '',
+                  adjuntoData: nextItem.adjuntoData || '',
+                  estado: 'Enviado',
+                }),
+              });
+            } catch (err) {
+              const destLabel =
+                nextItem.nombreDestinatario && nextItem.nombreDestinatario !== '—'
+                  ? `${nextItem.nombreDestinatario} (+${nextItem.telefonoDestinatario})`
+                  : `+${nextItem.telefonoDestinatario}`;
+              toast.warning(`Aviso en difusión (${destLabel}): ${err.message || 'No se pudo entregar por WhatsApp (marcado como Fallido)'}`);
+            }
           }
+        }
+
+        if (b.sent >= b.total) {
+          b.active = false;
+          b.completed = true;
+          b.secondsToNext = 0;
+          toast.success(
+            `Campaña de difusión completada: ${b.total} de ${b.total} mensajes enviados.`
+          );
+        } else {
+          b.secondsToNext = b.intervalSeconds;
+        }
+      }
+    }
+
+    // 2. Procesar Mensajes Programados en segundo plano (con protección estricta contra duplicados)
+    if (queueState.scheduled.length > 0) {
+      const now = Date.now();
+      const readyToDispatch = [];
+      const remainingList = [];
+
+      // Separación sincrónica inmediata: los mensajes que ya vencieron salen de la lista antes del await
+      for (const item of queueState.scheduled) {
+        const remSecs = Math.max(0, Math.ceil((item.targetTimeMs - now) / 1000));
+        item.remainingSeconds = remSecs;
+        const elapsed = Math.max(0, item.totalSeconds - remSecs);
+        item.progressPercent = Math.min(
+          100,
+          Math.max(2, Math.round((elapsed / Math.max(1, item.totalSeconds)) * 100))
+        );
+        changed = true;
+
+        if (remSecs <= 0) {
+          if (!item.isProcessing) {
+            item.isProcessing = true;
+            readyToDispatch.push(item);
+          }
+        } else {
+          remainingList.push(item);
         }
       }
 
-      if (b.sent >= b.total) {
-        b.active = false;
-        b.completed = true;
-        b.secondsToNext = 0;
-        toast.success(
-          `Campaña de difusión completada: ${b.total} de ${b.total} mensajes enviados.`
-        );
-      } else {
-        b.secondsToNext = b.intervalSeconds;
-      }
-    }
-  }
+      queueState.scheduled = remainingList;
 
-  // 2. Procesar Mensajes Programados en segundo plano
-  if (queueState.scheduled.length > 0) {
-    const now = Date.now();
-    const remainingList = [];
+      // Despacho de mensajes listos (con candado localStorage para prevenir envíos dobles si hay varias pestañas)
+      for (const item of readyToDispatch) {
+        const lockKey = `r1_sched_lock_${item.id}`;
+        try {
+          const prevLock = localStorage.getItem(lockKey);
+          if (prevLock && now - Number(prevLock) < 120000) {
+            // Ya tomado por otra pestaña activa
+            continue;
+          }
+          localStorage.setItem(lockKey, String(now));
+        } catch (_) {}
 
-    for (const item of queueState.scheduled) {
-      const remSecs = Math.max(0, Math.ceil((item.targetTimeMs - now) / 1000));
-      item.remainingSeconds = remSecs;
-      const elapsed = Math.max(0, item.totalSeconds - remSecs);
-      item.progressPercent = Math.min(
-        100,
-        Math.max(2, Math.round((elapsed / Math.max(1, item.totalSeconds)) * 100))
-      );
-      changed = true;
-
-      if (remSecs <= 0) {
+        let sendOk = true;
+        let sendErrMsg = '';
         if (item.id) {
           try {
             await apiFetch(`/api/difusion-mensajes/${item.id}`, {
@@ -480,25 +512,28 @@ async function processTick() {
                 estado: 'Enviado',
               }),
             });
-          } catch (_) {
-            // Continuar
+          } catch (err) {
+            sendOk = false;
+            sendErrMsg = err.message || 'Error en el envío por WhatsApp';
           }
         }
         const label =
           item.nombreDestinatario && item.nombreDestinatario !== '—'
             ? `${item.nombreDestinatario} (${item.telefonoDestinatario})`
             : item.telefonoDestinatario;
-        toast.success(`Mensaje programado enviado automáticamente a ${label}.`);
-      } else {
-        remainingList.push(item);
+        if (sendOk) {
+          toast.success(`Mensaje programado enviado automáticamente a ${label}.`);
+        } else {
+          toast.warning(`No se pudo enviar el mensaje programado a ${label}: ${sendErrMsg}`);
+        }
       }
     }
 
-    queueState.scheduled = remainingList;
-  }
-
-  if (changed) {
-    notify();
+    if (changed) {
+      notify();
+    }
+  } finally {
+    isTicking = false;
   }
 }
 

@@ -1,12 +1,12 @@
 import { createButton } from '../components/button.js';
 import { createDataTable } from '../components/table.js';
 import { openModal, openConfirmModal } from '../components/modal.js';
-import { createPhoneInput } from '../components/phone-input.js?v=20261029_8';
+import { createPhoneInput } from '../components/phone-input.js?v=20261030_5';
 import {
   createMediaAttachmentInput,
   renderMediaPreviewCard,
   openImageZoomModal,
-} from '../components/media-attachment.js?v=20261029_8';
+} from '../components/media-attachment.js?v=20261030_5';
 import { toast } from '../components/toast.js';
 import { apiFetch } from '../services/api.js';
 import {
@@ -16,7 +16,7 @@ import {
   formatRemainingDuration,
   consumePreferredBroadcastTab,
   clearCompletedBroadcastBanner,
-} from '../services/queue-manager.js?v=20261029_8';
+} from '../services/queue-manager.js?v=20261030_5';
 
 const QUICK_EMOJIS = ['👋', '😊', '✨', '🎉', '👍', '💼', '💰', '🗓️'];
 
@@ -52,6 +52,67 @@ function normalizeDigits(phone) {
   return String(phone || '').replace(/[^\d]/g, '');
 }
 
+/**
+ * Lee la configuración de formato de nombre configurada en el módulo de Configuración
+ * ({ incluir_nombre: boolean, incluir_apellido: boolean })
+ */
+export function getWhatsAppNameFormatConfig() {
+  try {
+    const raw = localStorage.getItem('r1_whatsapp_nombre_formato');
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (typeof parsed.incluir_nombre === 'boolean' || typeof parsed.incluir_apellido === 'boolean') {
+        return parsed;
+      }
+    }
+  } catch (_) {}
+  return { incluir_nombre: true, incluir_apellido: true };
+}
+
+/**
+ * Resuelve el nombre del destinatario según la configuración de Configuración:
+ * - Si está marcado solo "Nombre" -> "Juan"
+ * - Si está marcado "Nombre" y "Apellido" -> "Juan Pérez"
+ * - Si está marcado solo "Apellido" -> "Pérez"
+ */
+export function formatRecipientDisplayName(contact) {
+  if (!contact) return 'Cliente';
+  if (contact.tipoCliente === 'empresa' || contact.origen === 'Proveedor') {
+    return contact.nombre || 'Cliente';
+  }
+
+  const cfg = getWhatsAppNameFormatConfig();
+  const incNombre = cfg.incluir_nombre !== false;
+  const incApellido = cfg.incluir_apellido !== false;
+
+  let first = String(contact.nombres || '').trim();
+  let last = String(contact.apellidos || '').trim();
+
+  if (!first && !last) {
+    const full = String(contact.nombre || '').trim();
+    if (!full || full === 'Cliente' || full === '—') return full || 'Cliente';
+    const parts = full.split(/\s+/);
+    if (parts.length > 1) {
+      first = parts[0];
+      last = parts.slice(1).join(' ');
+    } else {
+      first = parts[0];
+      last = '';
+    }
+  }
+
+  if (incNombre && incApellido) {
+    return [first, last].filter(Boolean).join(' ') || contact.nombre || 'Cliente';
+  }
+  if (incNombre && !incApellido) {
+    return first || contact.nombre || 'Cliente';
+  }
+  if (!incNombre && incApellido) {
+    return last || first || contact.nombre || 'Cliente';
+  }
+  return [first, last].filter(Boolean).join(' ') || contact.nombre || 'Cliente';
+}
+
 function resolveDynamicMessage(rawText, contact) {
   const c = contact || {
     nombre: 'Cliente',
@@ -62,8 +123,11 @@ function resolveDynamicMessage(rawText, contact) {
     productos: 'Productos R1',
     cantidad_productos: '1',
   };
+
+  const displayName = formatRecipientDisplayName(c);
+
   return String(rawText || '')
-    .split('{nombre}').join(c.nombre || 'Cliente')
+    .split('{nombre}').join(displayName)
     .split('{telefono}').join(c.telefono || '')
     .split('{documento}').join(c.documento || '')
     .split('{ciudad}').join(c.ciudad || '')
@@ -2569,16 +2633,21 @@ export function renderDifusionMensajesModule(container) {
           key: 'estado',
           label: 'ESTADO',
           render: (row) => {
-            const isProg = (row.estado || '').toLowerCase().includes('program');
+            const st = (row.estado || '').toLowerCase();
+            const isProg = st.includes('program') || st.includes('cola');
+            const isFail = st.includes('fall');
+            let colorCls = 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300';
+            let dotCls = 'bg-emerald-500';
+            if (isFail) {
+              colorCls = 'bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400';
+              dotCls = 'bg-rose-500';
+            } else if (isProg) {
+              colorCls = 'bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300';
+              dotCls = 'bg-amber-500';
+            }
             return `
-              <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold ${
-                isProg
-                  ? 'bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300'
-                  : 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300'
-              }">
-                <span class="w-1.5 h-1.5 rounded-full ${
-                  isProg ? 'bg-amber-500' : 'bg-emerald-500'
-                }"></span>
+              <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold ${colorCls}">
+                <span class="w-1.5 h-1.5 rounded-full ${dotCls}"></span>
                 ${escapeHtml(row.estado || 'Enviado')}
               </span>
             `;
@@ -2591,6 +2660,39 @@ export function renderDifusionMensajesModule(container) {
           render: (row) => {
             const actWrap = document.createElement('div');
             actWrap.className = 'inline-flex items-center justify-end gap-1';
+
+            const st = (row.estado || '').toLowerCase();
+            const isFail = st.includes('fall');
+
+            if (isFail) {
+              const retryBtn = createButton({
+                icon: 'fa-solid fa-rotate-right',
+                variant: 'primary',
+                size: 'sm',
+                ariaLabel: 'Reintentar envío ahora',
+                onClick: async (_, btn) => {
+                  btn.setLoading(true);
+                  try {
+                    await apiFetch(`/api/difusion-mensajes/${row.id}`, {
+                      method: 'PUT',
+                      body: JSON.stringify({
+                        nombreDestinatario: row.nombreDestinatario || '—',
+                        telefonoDestinatario: row.telefonoDestinatario || '',
+                        contenido: row.contenido || '',
+                        estado: 'Enviado',
+                      }),
+                    });
+                    toast.success('Mensaje reenviado exitosamente por WhatsApp.');
+                    fetchHistorial();
+                  } catch (err) {
+                    toast.error(err.message || 'No se pudo reenviar el mensaje.');
+                  } finally {
+                    btn.setLoading(false);
+                  }
+                },
+              });
+              actWrap.appendChild(retryBtn);
+            }
 
             const viewBtn = createButton({
               icon: 'fa-solid fa-eye',

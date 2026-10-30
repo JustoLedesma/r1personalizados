@@ -366,6 +366,127 @@ func (h *ReciclajeHandler) List(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// 5. Categorías de Productos en reciclaje
+	if modulo == "" || modulo == "categorias" || modulo == "categorías" || modulo == "productos" {
+		rows, err := h.DB.QueryContext(r.Context(), `
+			SELECT id, nombre, created_at, updated_at, COALESCE(deleted_by, 'admin'), deleted_at
+			FROM categorias_productos
+			WHERE deleted_at IS NOT NULL
+			ORDER BY deleted_at DESC
+		`)
+		if err == nil {
+			for rows.Next() {
+				var idNum int
+				var nombre, deletedBy string
+				var createdAt, updatedAt, deletedAtTime time.Time
+				if scanErr := rows.Scan(&idNum, &nombre, &createdAt, &updatedAt, &deletedBy, &deletedAtTime); scanErr == nil {
+					campos := []RecycleField{
+						{Label: "Nombre de Categoría", Value: nombre},
+					}
+					item := RecycleItem{
+						ID:            idNum,
+						Modulo:        "Categorías de Productos",
+						Identificador: "#" + strconv.Itoa(idNum),
+						Nombre:        nombre,
+						Detalle:       "Categoría del catálogo",
+						CreatedAt:     createdAt,
+						UpdatedAt:     updatedAt,
+						DeletedBy:     deletedBy,
+						DeletedAt:     deletedAtTime,
+						Campos:        campos,
+					}
+					if q == "" || matchesRecycleSearch(item, q) {
+						allItems = append(allItems, item)
+					}
+				}
+			}
+			rows.Close()
+		}
+	}
+
+	// 6. Marcas de Productos en reciclaje
+	if modulo == "" || modulo == "marcas" || modulo == "productos" {
+		rows, err := h.DB.QueryContext(r.Context(), `
+			SELECT id, nombre, created_at, updated_at, COALESCE(deleted_by, 'admin'), deleted_at
+			FROM marcas_productos
+			WHERE deleted_at IS NOT NULL
+			ORDER BY deleted_at DESC
+		`)
+		if err == nil {
+			for rows.Next() {
+				var idNum int
+				var nombre, deletedBy string
+				var createdAt, updatedAt, deletedAtTime time.Time
+				if scanErr := rows.Scan(&idNum, &nombre, &createdAt, &updatedAt, &deletedBy, &deletedAtTime); scanErr == nil {
+					campos := []RecycleField{
+						{Label: "Nombre de Marca", Value: nombre},
+					}
+					item := RecycleItem{
+						ID:            idNum,
+						Modulo:        "Marcas de Productos",
+						Identificador: "#" + strconv.Itoa(idNum),
+						Nombre:        nombre,
+						Detalle:       "Marca del catálogo",
+						CreatedAt:     createdAt,
+						UpdatedAt:     updatedAt,
+						DeletedBy:     deletedBy,
+						DeletedAt:     deletedAtTime,
+						Campos:        campos,
+					}
+					if q == "" || matchesRecycleSearch(item, q) {
+						allItems = append(allItems, item)
+					}
+				}
+			}
+			rows.Close()
+		}
+	}
+
+	// 7. Unidades de Medida en reciclaje
+	if modulo == "" || modulo == "unidades" || modulo == "productos" {
+		rows, err := h.DB.QueryContext(r.Context(), `
+			SELECT id, nombre, abreviatura, permite_decimales, created_at, updated_at, COALESCE(deleted_by, 'admin'), deleted_at
+			FROM unidades_medida
+			WHERE deleted_at IS NOT NULL
+			ORDER BY deleted_at DESC
+		`)
+		if err == nil {
+			for rows.Next() {
+				var idNum int
+				var nombre, abrev, deletedBy string
+				var dec bool
+				var createdAt, updatedAt, deletedAtTime time.Time
+				if scanErr := rows.Scan(&idNum, &nombre, &abrev, &dec, &createdAt, &updatedAt, &deletedBy, &deletedAtTime); scanErr == nil {
+					decStr := "Solo enteros"
+					if dec {
+						decStr = "Admite decimales"
+					}
+					campos := []RecycleField{
+						{Label: "Nombre de Unidad", Value: nombre},
+						{Label: "Abreviatura", Value: abrev},
+						{Label: "Modo Decimal", Value: decStr},
+					}
+					item := RecycleItem{
+						ID:            idNum,
+						Modulo:        "Unidades de Medida",
+						Identificador: abrev,
+						Nombre:        nombre + " (" + abrev + ")",
+						Detalle:       decStr,
+						CreatedAt:     createdAt,
+						UpdatedAt:     updatedAt,
+						DeletedBy:     deletedBy,
+						DeletedAt:     deletedAtTime,
+						Campos:        campos,
+					}
+					if q == "" || matchesRecycleSearch(item, q) {
+						allItems = append(allItems, item)
+					}
+				}
+			}
+			rows.Close()
+		}
+	}
+
 	sort.Slice(allItems, func(i, j int) bool {
 		return allItems[i].DeletedAt.After(allItems[j].DeletedAt)
 	})
@@ -441,6 +562,24 @@ func (h *ReciclajeHandler) Restore(w http.ResponseWriter, r *http.Request) {
 		_, err := h.DB.ExecContext(r.Context(), "UPDATE mensajes_historial SET deleted_at = NULL, deleted_by = NULL WHERE id = ?", req.ID)
 		if err != nil {
 			auth.WriteJSONError(w, http.StatusInternalServerError, "no se pudo restaurar el mensaje del historial")
+			return
+		}
+	case "categorías de productos", "categorias", "categoria", "categorias_productos":
+		_, err := h.DB.ExecContext(r.Context(), "UPDATE categorias_productos SET deleted_at = NULL, deleted_by = NULL WHERE id = ?", req.ID)
+		if err != nil {
+			auth.WriteJSONError(w, http.StatusInternalServerError, "no se pudo restaurar la categoría")
+			return
+		}
+	case "marcas de productos", "marcas", "marca", "marcas_productos":
+		_, err := h.DB.ExecContext(r.Context(), "UPDATE marcas_productos SET deleted_at = NULL, deleted_by = NULL WHERE id = ?", req.ID)
+		if err != nil {
+			auth.WriteJSONError(w, http.StatusInternalServerError, "no se pudo restaurar la marca")
+			return
+		}
+	case "unidades de medida", "unidades", "unidad", "unidades_medida":
+		_, err := h.DB.ExecContext(r.Context(), "UPDATE unidades_medida SET deleted_at = NULL, deleted_by = NULL WHERE id = ?", req.ID)
+		if err != nil {
+			auth.WriteJSONError(w, http.StatusInternalServerError, "no se pudo restaurar la unidad de medida")
 			return
 		}
 	default:

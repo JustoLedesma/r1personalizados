@@ -403,6 +403,26 @@ func (h *DifusionMensajesHandler) Update(w http.ResponseWriter, r *http.Request,
 
 	var waSendErr error
 	if prevEstado != "Enviado" && payload.Estado == "Enviado" {
+		// Candado atómico: evitar que dos peticiones concurrentes envíen el mismo mensaje dos veces
+		resLock, errLock := h.DB.ExecContext(r.Context(), `
+			UPDATE mensajes_historial
+			SET estado = 'Enviando'
+			WHERE id = ? AND estado != 'Enviado' AND estado != 'Enviando' AND deleted_at IS NULL
+		`, id)
+		if errLock != nil {
+			auth.WriteJSONError(w, http.StatusInternalServerError, "error al bloquear mensaje para envío")
+			return
+		}
+		rowsAff, _ := resLock.RowsAffected()
+		if rowsAff == 0 {
+			// Ya fue enviado o está siendo enviado por otra petición concurrente
+			payload.ID = id
+			payload.Estado = "Enviado"
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			_ = json.NewEncoder(w).Encode(payload)
+			return
+		}
+
 		if h.WA == nil || !h.WA.IsConnected() {
 			payload.Estado = "Fallido"
 			waSendErr = sql.ErrConnDone
