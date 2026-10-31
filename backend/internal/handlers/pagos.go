@@ -332,14 +332,27 @@ func (h *PagosHandler) getStats(ctx context.Context) models.PagoStats {
 			COUNT(CASE WHEN fecha_pago = ? THEN 1 END) AS pagados_hoy,
 			COUNT(CASE WHEN semana_iso = ? AND anio_iso = ? THEN 1 END) AS pagados_semana,
 			COUNT(CASE WHEN DATE_FORMAT(fecha_pago, '%Y-%m') = ? THEN 1 END) AS pagados_mes,
+			COALESCE(SUM(monto_total), 0) AS monto_total,
 			COALESCE(SUM(saldo_pendiente), 0) AS monto_pendiente,
-			COALESCE(SUM(monto_pagado), 0) AS monto_pagado
+			COALESCE(SUM(monto_pagado), 0) AS monto_pagado,
+			COALESCE(SUM(CASE WHEN fecha_pago = ? THEN monto_total ELSE 0 END), 0) AS monto_hoy,
+			COALESCE(SUM(CASE WHEN semana_iso = ? AND anio_iso = ? THEN monto_total ELSE 0 END), 0) AS monto_semana,
+			COALESCE(SUM(CASE WHEN DATE_FORMAT(fecha_pago, '%Y-%m') = ? THEN monto_total ELSE 0 END), 0) AS monto_mes,
+			COALESCE(SUM(CASE WHEN fecha_pago = ? THEN monto_pagado ELSE 0 END), 0) AS monto_pagado_hoy,
+			COALESCE(SUM(CASE WHEN semana_iso = ? AND anio_iso = ? THEN monto_pagado ELSE 0 END), 0) AS monto_pagado_semana,
+			COALESCE(SUM(CASE WHEN DATE_FORMAT(fecha_pago, '%Y-%m') = ? THEN monto_pagado ELSE 0 END), 0) AS monto_pagado_mes
 		FROM pagos
 		WHERE deleted_at IS NULL
 	`
-	_ = h.DB.QueryRowContext(ctx, query, todayStr, semanaISO, anioISO, currentMonth).Scan(
+	_ = h.DB.QueryRowContext(ctx, query,
+		todayStr, semanaISO, anioISO, currentMonth,
+		todayStr, semanaISO, anioISO, currentMonth,
+		todayStr, semanaISO, anioISO, currentMonth,
+	).Scan(
 		&s.Total, &s.Pendientes, &s.PagadosHoy, &s.PagadosSemana, &s.PagadosMes,
-		&s.MontoPendiente, &s.MontoPagado,
+		&s.MontoTotal, &s.MontoPendiente, &s.MontoPagado,
+		&s.MontoHoy, &s.MontoSemana, &s.MontoMes,
+		&s.MontoPagadoHoy, &s.MontoPagadoSemana, &s.MontoPagadoMes,
 	)
 	return s
 }

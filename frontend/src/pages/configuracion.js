@@ -3,6 +3,7 @@ import { openModal, openConfirmModal } from '../components/modal.js';
 import { toast } from '../components/toast.js';
 import { apiFetch } from '../services/api.js';
 import { createPhoneInput } from '../components/phone-input.js';
+import { BudgetDocumentService, loadPdfmeLibraries, resolveBasePdf } from '../services/budget-document.service.js?v=20261031_3';
 
 function escapeHtml(str) {
   if (str === null || str === undefined) return '';
@@ -1227,24 +1228,451 @@ export function renderConfiguracionModule(container) {
   }
 
   // ============================================================================
-  // PESTAÑA 4: PRESUPUESTO (Queda vacía como solicitó el usuario)
+  // PESTAÑA 4: PRESUPUESTO — Diseñador de Plantillas Interactivo con @pdfme
   // ============================================================================
+  let activeBudgetDesigner = null;
+
   function renderPresupuestoTab(parent) {
+    if (activeBudgetDesigner) {
+      try {
+        activeBudgetDesigner.destroy();
+      } catch (_) {}
+      activeBudgetDesigner = null;
+    }
+
     const card = document.createElement('section');
     card.className =
-      'w-full bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl p-10 sm:p-14 shadow-xs text-center space-y-3';
-    card.innerHTML = `
-      <div class="w-14 h-14 mx-auto rounded-2xl bg-brand-soft dark:bg-brand/20 text-brand flex items-center justify-center">
-        <i class="fa-regular fa-file-lines text-2xl"></i>
+      'w-full bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl p-5 sm:p-7 shadow-xs space-y-6';
+
+    // 1. Cabecera informativa
+    const header = document.createElement('div');
+    header.className =
+      'flex flex-wrap items-center justify-between gap-4 pb-4 border-b border-slate-100 dark:border-slate-800';
+    header.innerHTML = `
+      <div class="flex items-start gap-3">
+        <span class="w-10 h-10 rounded-xl bg-brand-soft dark:bg-brand/20 text-brand flex items-center justify-center shrink-0">
+          <i class="fa-regular fa-file-lines text-lg"></i>
+        </span>
+        <div>
+          <div class="flex items-center gap-2">
+            <h2 class="text-sm sm:text-base font-bold text-slate-900 dark:text-white">
+              Diseñador de Plantillas de Presupuestos
+            </h2>
+            <span class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400">
+              @pdfme Client-Side
+            </span>
+          </div>
+          <p class="text-xs text-slate-500 dark:text-slate-400">
+            Diseñe visualmente la plantilla de cotización para R1 personalizados. Renderizado 100% en el navegador con soporte de variables dinámicas y tablas.
+          </p>
+        </div>
       </div>
-      <h3 class="text-base sm:text-lg font-bold text-slate-900 dark:text-white">
-        Configuración de Presupuestos
-      </h3>
-      <p class="text-xs sm:text-sm text-slate-500 dark:text-slate-400 max-w-md mx-auto">
-        Esta sección se encuentra en preparación y se habilitará en las próximas versiones para definir plantillas de presupuestos, vigencias y condiciones de cotización.
-      </p>
+      <div id="budget-actions-top" class="flex flex-wrap items-center gap-2"></div>
     `;
+    card.appendChild(header);
+
+    // Barra de acciones superiores
+    const actionsTop = header.querySelector('#budget-actions-top');
+
+    const btnRestablecer = createButton({
+      text: 'Restablecer Base',
+      icon: 'fa-solid fa-rotate-left',
+      variant: 'cancel',
+      size: 'sm',
+      onClick: () => handleRestablecerBase(),
+    });
+
+    const btnPreview = createButton({
+      text: 'Previsualizar PDF',
+      icon: 'fa-regular fa-eye',
+      variant: 'primary',
+      size: 'sm',
+      onClick: () => handlePrevisualizarPDF(),
+    });
+
+    const btnGuardar = createButton({
+      text: 'Guardar Configuración',
+      icon: 'fa-solid fa-floppy-disk',
+      variant: 'primary',
+      size: 'sm',
+      onClick: () => handleGuardarTemplate(),
+    });
+
+    actionsTop.appendChild(btnRestablecer);
+    actionsTop.appendChild(btnPreview);
+    actionsTop.appendChild(btnGuardar);
+
+    // 2. Barra de configuración de página y opciones
+    const configBar = document.createElement('div');
+    configBar.className =
+      'grid grid-cols-1 md:grid-cols-4 gap-4 p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/60 text-xs';
+    configBar.innerHTML = `
+      <div>
+        <label class="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
+          <i class="fa-solid fa-ruler-combined mr-1 text-brand"></i> Tamaño de Página
+        </label>
+        <select id="budget-page-size" class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 focus:outline-hidden focus:ring-2 focus:ring-brand">
+          <option value="A4" selected>A4 (210 × 297 mm)</option>
+          <option value="Letter">Carta / Letter (215.9 × 279.4 mm)</option>
+          <option value="Legal">Oficio / Legal (215.9 × 355.6 mm)</option>
+          <option value="Custom">Personalizado (mm)</option>
+        </select>
+      </div>
+
+      <div id="custom-size-container" class="hidden flex items-center gap-2">
+        <div class="flex-1">
+          <label class="block font-medium text-slate-600 dark:text-slate-400 mb-1">Ancho (mm)</label>
+          <input type="number" id="budget-custom-w" value="210" min="50" max="600" class="w-full px-2.5 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 text-xs" />
+        </div>
+        <div class="flex-1">
+          <label class="block font-medium text-slate-600 dark:text-slate-400 mb-1">Alto (mm)</label>
+          <input type="number" id="budget-custom-h" value="297" min="50" max="600" class="w-full px-2.5 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 text-xs" />
+        </div>
+      </div>
+
+      <div>
+        <label class="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
+          <i class="fa-solid fa-arrows-spin mr-1 text-brand"></i> Orientación
+        </label>
+        <select id="budget-orientation" class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 focus:outline-hidden focus:ring-2 focus:ring-brand">
+          <option value="portrait" selected>Vertical (Portrait)</option>
+          <option value="landscape">Horizontal (Landscape)</option>
+        </select>
+      </div>
+
+      <div class="flex flex-col justify-center">
+        <span class="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
+          <i class="fa-regular fa-image mr-1 text-brand"></i> Hoja 2 de Fotos
+        </span>
+        <div class="flex items-center justify-between">
+          <span class="text-slate-500 dark:text-slate-400 text-[11px]">Grilla de imágenes presupuestadas</span>
+          <label class="relative inline-flex items-center cursor-pointer select-none">
+            <input type="checkbox" id="budget-toggle-fotos" class="sr-only peer" checked />
+            <div class="w-11 h-6 bg-slate-200 peer-focus:outline-hidden rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-slate-600 peer-checked:bg-blue-600"></div>
+          </label>
+        </div>
+      </div>
+    `;
+    card.appendChild(configBar);
+
+    // 3. Panel de Variables Disponibles (Acordeón Cheatsheet)
+    const varsPanel = document.createElement('details');
+    varsPanel.className =
+      'group rounded-xl border border-slate-200/80 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/40 p-4 transition-all duration-150';
+    varsPanel.innerHTML = `
+      <summary class="flex items-center justify-between cursor-pointer list-none select-none text-xs font-semibold text-slate-800 dark:text-slate-200">
+        <span class="flex items-center gap-2">
+          <i class="fa-solid fa-code text-brand"></i>
+          Mapeo de Variables Disponibles en el Diseñador (Haga clic sobre una variable para copiar)
+        </span>
+        <span class="text-slate-400 group-open:rotate-180 transition-transform duration-200">
+          <i class="fa-solid fa-chevron-down text-xs"></i>
+        </span>
+      </summary>
+      <div class="mt-4 pt-3 border-t border-slate-200/60 dark:border-slate-800 space-y-3 text-xs">
+        <div>
+          <span class="font-semibold text-slate-700 dark:text-slate-300 block mb-1">
+            <i class="fa-regular fa-building mr-1 text-slate-400"></i> Datos Institucionales:
+          </span>
+          <div class="flex flex-wrap gap-1.5" data-vars-group="institucional">
+            <button type="button" class="var-badge" data-var="{{empresa_logo}}">{{empresa_logo}}</button>
+            <button type="button" class="var-badge" data-var="{{empresa_redes}}">{{empresa_redes}}</button>
+            <button type="button" class="var-badge" data-var="{{empresa_web}}">{{empresa_web}}</button>
+            <button type="button" class="var-badge" data-var="{{empresa_telefono}}">{{empresa_telefono}}</button>
+            <button type="button" class="var-badge" data-var="{{empresa_locacion}}">{{empresa_locacion}}</button>
+          </div>
+        </div>
+
+        <div>
+          <span class="font-semibold text-slate-700 dark:text-slate-300 block mb-1">
+            <i class="fa-regular fa-user mr-1 text-slate-400"></i> Cabecera y Cliente:
+          </span>
+          <div class="flex flex-wrap gap-1.5" data-vars-group="cabecera">
+            <button type="button" class="var-badge" data-var="{{cliente_nombre}}">{{cliente_nombre}}</button>
+            <button type="button" class="var-badge" data-var="{{cliente_ruc}}">{{cliente_ruc}}</button>
+            <button type="button" class="var-badge" data-var="{{cliente_telefono}}">{{cliente_telefono}}</button>
+            <button type="button" class="var-badge" data-var="{{fecha_emision}}">{{fecha_emision}}</button>
+            <button type="button" class="var-badge" data-var="{{validez_dias}}">{{validez_dias}}</button>
+            <button type="button" class="var-badge" data-var="{{validez_fecha}}">{{validez_fecha}}</button>
+            <button type="button" class="var-badge" data-var="{{numero_presupuesto}}">{{numero_presupuesto}}</button>
+          </div>
+        </div>
+
+        <div>
+          <span class="font-semibold text-slate-700 dark:text-slate-300 block mb-1">
+            <i class="fa-solid fa-table-list mr-1 text-slate-400"></i> Tabla de Artículos:
+          </span>
+          <div class="flex flex-wrap gap-1.5" data-vars-group="tabla">
+            <button type="button" class="var-badge" data-var="{{articulos_tabla}}">{{articulos_tabla}} (Tabla Completa)</button>
+            <button type="button" class="var-badge" data-var="{{item_descripcion}}">{{item_descripcion}}</button>
+            <button type="button" class="var-badge" data-var="{{item_precio_unitario}}">{{item_precio_unitario}}</button>
+            <button type="button" class="var-badge" data-var="{{item_cantidad}}">{{item_cantidad}}</button>
+            <button type="button" class="var-badge" data-var="{{item_total}}">{{item_total}}</button>
+          </div>
+        </div>
+
+        <div>
+          <span class="font-semibold text-slate-700 dark:text-slate-300 block mb-1">
+            <i class="fa-solid fa-calculator mr-1 text-slate-400"></i> Descuentos y Totales:
+          </span>
+          <div class="flex flex-wrap gap-1.5" data-vars-group="totales">
+            <button type="button" class="var-badge" data-var="{{subtotal}}">{{subtotal}}</button>
+            <button type="button" class="var-badge" data-var="{{porcentaje_descuento}}">{{porcentaje_descuento}}</button>
+            <button type="button" class="var-badge" data-var="{{monto_descuento}}">{{monto_descuento}}</button>
+            <button type="button" class="var-badge" data-var="{{total_final}}">{{total_final}}</button>
+          </div>
+        </div>
+
+        <div>
+          <span class="font-semibold text-slate-700 dark:text-slate-300 block mb-1">
+            <i class="fa-regular fa-file-lines mr-1 text-slate-400"></i> Bloque de Términos y Hoja de Fotos:
+          </span>
+          <div class="flex flex-wrap gap-1.5" data-vars-group="otros">
+            <button type="button" class="var-badge" data-var="{{terminos_condiciones}}">{{terminos_condiciones}}</button>
+            <button type="button" class="var-badge" data-var="{{foto_producto_1}}">{{foto_producto_1}}</button>
+            <button type="button" class="var-badge" data-var="{{foto_producto_2}}">{{foto_producto_2}}</button>
+            <button type="button" class="var-badge" data-var="{{foto_producto_3}}">{{foto_producto_3}}</button>
+            <button type="button" class="var-badge" data-var="{{foto_producto_4}}">{{foto_producto_4}}</button>
+            <button type="button" class="var-badge" data-var="{{foto_producto_5}}">{{foto_producto_5}}</button>
+          </div>
+        </div>
+      </div>
+    `;
+
+    // Eventos de copiado rápido al hacer clic en un badge de variable
+    varsPanel.querySelectorAll('.var-badge').forEach((btn) => {
+      btn.className =
+        'inline-flex items-center px-2 py-1 rounded-md text-[11px] font-mono font-medium bg-slate-200/80 dark:bg-slate-800 text-brand dark:text-brand-hover hover:bg-brand-soft dark:hover:bg-brand/20 transition-colors border border-slate-300/60 dark:border-slate-700/60';
+      btn.addEventListener('click', () => {
+        const text = btn.getAttribute('data-var');
+        if (navigator.clipboard) {
+          navigator.clipboard.writeText(text).then(() => {
+            toast.success(`Copiado: ${text}`);
+          });
+        }
+      });
+    });
+
+    card.appendChild(varsPanel);
+
+    // 4. Bloque de Términos y Condiciones editable
+    const termsBlock = document.createElement('details');
+    termsBlock.className =
+      'group rounded-xl border border-slate-200/80 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/40 p-4 transition-all duration-150';
+    termsBlock.innerHTML = `
+      <summary class="flex items-center justify-between cursor-pointer list-none select-none text-xs font-semibold text-slate-800 dark:text-slate-200">
+        <span class="flex items-center gap-2">
+          <i class="fa-solid fa-list-check text-brand"></i>
+          Cláusulas de Términos y Condiciones Operativas (Texto precargado en {{terminos_condiciones}})
+        </span>
+        <span class="text-slate-400 group-open:rotate-180 transition-transform duration-200">
+          <i class="fa-solid fa-chevron-down text-xs"></i>
+        </span>
+      </summary>
+      <div class="mt-3 pt-3 border-t border-slate-200/60 dark:border-slate-800 space-y-2">
+        <p class="text-[11px] text-slate-500 dark:text-slate-400">
+          Estas cláusulas se insertan automáticamente en el bloque inferior del presupuesto oficial:
+        </p>
+        <textarea id="budget-terms-input" rows="4" class="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 focus:outline-hidden focus:ring-2 focus:ring-brand font-sans leading-relaxed">1. Validez de la oferta: Este presupuesto tiene una validez de 15 días corridos a partir de su fecha de emisión.
+2. Condiciones de pago: El pedido se confirma con la entrega del 60%, por medio de efectivo o transferencia bancaria.
+3. Plazos de entrega: Tiempo estimado de 3 a 5 días hábiles posterior a la aprobación del diseño y confirmación de seña.
+4. Garantía y cambios: Tratándose de artículos personalizados, no se admiten cancelaciones una vez iniciada la producción.</textarea>
+      </div>
+    `;
+    card.appendChild(termsBlock);
+
+    // 5. Contenedor interactivo del Diseñador (@pdfme/ui)
+    const designerWrapper = document.createElement('div');
+    designerWrapper.className = 'w-full space-y-2';
+
+    const designerCanvas = document.createElement('div');
+    designerCanvas.id = 'pdfme-designer-holder';
+    designerCanvas.className =
+      'w-full h-[760px] min-h-[600px] rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-100 dark:bg-slate-950 overflow-hidden relative shadow-inner';
+
+    // Spinner de carga inicial
+    designerCanvas.innerHTML = `
+      <div class="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-white/80 dark:bg-slate-900/80 backdrop-blur-xs z-10" id="designer-loading-overlay">
+        <i class="fa-solid fa-circle-notch fa-spin text-3xl text-brand"></i>
+        <div class="text-center">
+          <p class="text-sm font-semibold text-slate-800 dark:text-slate-200">
+            Cargando Diseñador @pdfme...
+          </p>
+          <p class="text-xs text-slate-500 dark:text-slate-400">
+            Descargando plantilla base y módulos interactivos
+          </p>
+        </div>
+      </div>
+    `;
+
+    designerWrapper.appendChild(designerCanvas);
+    card.appendChild(designerWrapper);
     parent.appendChild(card);
+
+    // =========================================================================
+    // Lógica de Inicialización de @pdfme/ui Designer
+    // =========================================================================
+    let currentTemplate = null;
+
+    async function initDesigner() {
+      try {
+        const { Designer, plugins } = await loadPdfmeLibraries();
+
+        // 1. Obtener plantilla desde backend o fallback
+        const templateData = await apiFetch('/api/config/budget-template').catch(() => null);
+        currentTemplate = templateData || (await BudgetDocumentService.getDefaultBudgetTemplate());
+
+        // 2. Resolver basePdf
+        const resolvedBase = await resolveBasePdf(currentTemplate.basePdf);
+        const designerTemplate = {
+          ...currentTemplate,
+          basePdf: resolvedBase,
+        };
+
+        // 3. Limpiar contenedor
+        designerCanvas.innerHTML = '';
+
+        // 4. Instanciar @pdfme Designer
+        activeBudgetDesigner = new Designer({
+          domContainer: designerCanvas,
+          template: designerTemplate,
+          plugins,
+        });
+
+        // 5. Sincronizar selectores de tamaño y orientación
+        const selectSize = card.querySelector('#budget-page-size');
+        const selectOrient = card.querySelector('#budget-orientation');
+        if (currentTemplate.pageSize && selectSize) {
+          selectSize.value = currentTemplate.pageSize;
+        }
+        if (currentTemplate.orientation && selectOrient) {
+          selectOrient.value = currentTemplate.orientation;
+        }
+
+        toast.info('Diseñador cargado exitosamente');
+      } catch (err) {
+        console.error('Error al inicializar diseñador @pdfme:', err);
+        designerCanvas.innerHTML = `
+          <div class="p-8 text-center text-slate-500 dark:text-slate-400 space-y-3">
+            <i class="fa-solid fa-triangle-exclamation text-3xl text-amber-500"></i>
+            <p class="text-sm font-semibold text-slate-800 dark:text-slate-200">
+              No se pudo inicializar el Diseñador interactivo
+            </p>
+            <p class="text-xs max-w-md mx-auto">
+              ${escapeHtml(err.message || 'Verifique la conexión a internet para descargar las librerías de @pdfme')}
+            </p>
+            <div class="pt-2">
+              <button type="button" id="btn-reintentar-designer" class="px-4 py-2 rounded-lg bg-brand text-white text-xs font-semibold hover:bg-brand-hover">
+                Reintentar
+              </button>
+            </div>
+          </div>
+        `;
+        const retryBtn = designerCanvas.querySelector('#btn-reintentar-designer');
+        if (retryBtn) retryBtn.addEventListener('click', () => initDesigner());
+      }
+    }
+
+    // Iniciar carga del diseñador
+    initDesigner();
+
+    // =========================================================================
+    // Handlers de Acciones (Guardar, Previsualizar, Restablecer)
+    // =========================================================================
+
+    async function handleGuardarTemplate() {
+      if (!activeBudgetDesigner) {
+        toast.error('El diseñador aún no está activo');
+        return;
+      }
+      btnGuardar.disabled = true;
+      try {
+        const updated = activeBudgetDesigner.getTemplate();
+        const termsInput = card.querySelector('#budget-terms-input');
+        const pageSize = card.querySelector('#budget-page-size')?.value || 'A4';
+        const orientation = card.querySelector('#budget-orientation')?.value || 'portrait';
+
+        // Serializar estructura del template asegurando persistencia de basePdf
+        const payload = {
+          ...updated,
+          basePdf: currentTemplate?.basePdf || '/templates/presupuesto_base.pdf',
+          pageSize,
+          orientation,
+          terminos_condiciones_default: termsInput?.value || '',
+        };
+
+        const res = await apiFetch('/api/config/budget-template', {
+          method: 'POST',
+          body: JSON.stringify(payload),
+        });
+
+        toast.success(res?.message || 'Plantilla de presupuesto guardada con éxito');
+      } catch (err) {
+        console.error('Error al guardar plantilla:', err);
+        toast.error('Error al guardar la plantilla: ' + (err.message || 'Error desconocido'));
+      } finally {
+        btnGuardar.disabled = false;
+      }
+    }
+
+    async function handlePrevisualizarPDF() {
+      btnPreview.disabled = true;
+      try {
+        toast.info('Generando documento de presupuesto con @pdfme...');
+        await BudgetDocumentService.generateBudgetPDF('PRES-2026-0003', {
+          openInNewTab: true,
+          download: false,
+        });
+        toast.success('Documento generado en nueva pestaña');
+      } catch (err) {
+        console.error('Error al previsualizar presupuesto:', err);
+        toast.error('Error al generar PDF: ' + (err.message || 'Error desconocido'));
+      } finally {
+        btnPreview.disabled = false;
+      }
+    }
+
+    async function handleRestablecerBase() {
+      openConfirmModal({
+        title: 'Restablecer Plantilla Base',
+        message:
+          '¿Desea restablecer el diseñador a la plantilla base oficial predeterminada de R1 Personalizados?',
+        confirmText: 'Restablecer',
+        confirmVariant: 'danger',
+        onConfirm: async ({ close }) => {
+          if (typeof close === 'function') close();
+          try {
+            const defaultTpl = await BudgetDocumentService.getDefaultBudgetTemplate();
+            currentTemplate = defaultTpl;
+            const resolvedBase = await resolveBasePdf(defaultTpl.basePdf);
+            if (activeBudgetDesigner) {
+              activeBudgetDesigner.updateTemplate({
+                ...defaultTpl,
+                basePdf: resolvedBase,
+              });
+              toast.success('Plantilla base restablecida');
+            }
+          } catch (err) {
+            toast.error('Error al restablecer plantilla: ' + err.message);
+          }
+        },
+      });
+    }
+
+    // Eventos de Selectores de Tamaño y Orientación
+    const selectSize = card.querySelector('#budget-page-size');
+    const customContainer = card.querySelector('#custom-size-container');
+    const selectOrient = card.querySelector('#budget-orientation');
+
+    if (selectSize) {
+      selectSize.addEventListener('change', () => {
+        if (selectSize.value === 'Custom') {
+          customContainer.classList.remove('hidden');
+        } else {
+          customContainer.classList.add('hidden');
+        }
+      });
+    }
   }
 
   // ============================================================================

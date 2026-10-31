@@ -177,8 +177,15 @@ export function renderPagosModule(container) {
       pagadosHoy: 0,
       pagadosSemana: 0,
       pagadosMes: 0,
+      montoTotal: 0,
       montoPendiente: 0,
       montoPagado: 0,
+      montoHoy: 0,
+      montoSemana: 0,
+      montoMes: 0,
+      montoPagadoHoy: 0,
+      montoPagadoSemana: 0,
+      montoPagadoMes: 0,
     },
     loading: false,
     catalogoProveedores: [],
@@ -256,7 +263,7 @@ export function renderPagosModule(container) {
           </span>
         </div>
         <p class="text-2xl font-black text-slate-900 dark:text-white mt-2 font-mono">${state.stats.total}</p>
-        <p class="text-[11px] text-slate-400 mt-0.5">Vista general</p>
+        <p class="text-[11px] text-slate-400 mt-0.5 font-mono">Total: ${formatGuaranies(state.stats.montoTotal)}</p>
       </div>
 
       <div data-filter="pendientes" class="stat-card p-4 rounded-2xl bg-white dark:bg-slate-900 border transition shadow-xs cursor-pointer ${state.filter === 'pendientes' ? 'border-amber-500 ring-2 ring-amber-500/30 bg-amber-50/20 dark:bg-amber-950/20' : 'border-slate-200/80 dark:border-slate-800 hover:border-amber-400'}">
@@ -278,7 +285,7 @@ export function renderPagosModule(container) {
           </span>
         </div>
         <p class="text-2xl font-black text-emerald-600 dark:text-emerald-400 mt-2 font-mono">${state.stats.pagadosHoy}</p>
-        <p class="text-[11px] text-slate-400 mt-0.5">Fecha actual</p>
+        <p class="text-[11px] text-slate-400 mt-0.5 font-mono">Total: ${formatGuaranies(state.stats.montoHoy)}</p>
       </div>
 
       <div data-filter="semana" class="stat-card p-4 rounded-2xl bg-white dark:bg-slate-900 border transition shadow-xs cursor-pointer ${state.filter === 'semana' ? 'border-blue-500 ring-2 ring-blue-500/30 bg-blue-50/20 dark:bg-blue-950/20' : 'border-slate-200/80 dark:border-slate-800 hover:border-blue-400'}">
@@ -289,7 +296,7 @@ export function renderPagosModule(container) {
           </span>
         </div>
         <p class="text-2xl font-black text-blue-600 dark:text-blue-400 mt-2 font-mono">${state.stats.pagadosSemana}</p>
-        <p class="text-[11px] text-slate-400 mt-0.5">Semana ${weekNum}</p>
+        <p class="text-[11px] text-slate-400 mt-0.5 font-mono">Total: ${formatGuaranies(state.stats.montoSemana)}</p>
       </div>
 
       <div data-filter="mes" class="stat-card p-4 rounded-2xl bg-white dark:bg-slate-900 border transition shadow-xs cursor-pointer ${state.filter === 'mes' ? 'border-purple-500 ring-2 ring-purple-500/30 bg-purple-50/20 dark:bg-purple-950/20' : 'border-slate-200/80 dark:border-slate-800 hover:border-purple-400'} col-span-2 sm:col-span-1">
@@ -300,7 +307,7 @@ export function renderPagosModule(container) {
           </span>
         </div>
         <p class="text-2xl font-black text-purple-600 dark:text-purple-400 mt-2 font-mono">${state.stats.pagadosMes}</p>
-        <p class="text-[11px] text-slate-400 mt-0.5">Mes en curso</p>
+        <p class="text-[11px] text-slate-400 mt-0.5 font-mono">Total: ${formatGuaranies(state.stats.montoMes)}</p>
       </div>
     `;
 
@@ -668,8 +675,15 @@ export function renderPagosModule(container) {
             pagadosHoy: res.stats.pagadosHoy || 0,
             pagadosSemana: res.stats.pagadosSemana || 0,
             pagadosMes: res.stats.pagadosMes || 0,
+            montoTotal: res.stats.montoTotal || 0,
             montoPendiente: res.stats.montoPendiente || 0,
             montoPagado: res.stats.montoPagado || 0,
+            montoHoy: res.stats.montoHoy || 0,
+            montoSemana: res.stats.montoSemana || 0,
+            montoMes: res.stats.montoMes || 0,
+            montoPagadoHoy: res.stats.montoPagadoHoy || 0,
+            montoPagadoSemana: res.stats.montoPagadoSemana || 0,
+            montoPagadoMes: res.stats.montoPagadoMes || 0,
           };
           renderStatsCards();
         }

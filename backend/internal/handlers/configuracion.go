@@ -120,6 +120,226 @@ func (h *ConfiguracionHandler) SaveConfig(w http.ResponseWriter, r *http.Request
 }
 
 // ----------------------------------------------------------------------------
+// 1.1 Plantilla de Presupuesto (@pdfme Template Configuration)
+// ----------------------------------------------------------------------------
+
+func (h *ConfiguracionHandler) HandleBudgetTemplate(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		h.GetBudgetTemplate(w, r)
+	case http.MethodPost, http.MethodPut:
+		h.SaveBudgetTemplate(w, r)
+	default:
+		auth.WriteJSONError(w, http.StatusMethodNotAllowed, "método no permitido")
+	}
+}
+
+func (h *ConfiguracionHandler) GetBudgetTemplate(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	if h.DB != nil {
+		var rawValor string
+		err := h.DB.QueryRowContext(r.Context(), "SELECT valor FROM configuraciones WHERE clave = 'budget_template'").Scan(&rawValor)
+		if err == nil && strings.TrimSpace(rawValor) != "" {
+			var parsed any
+			if json.Unmarshal([]byte(rawValor), &parsed) == nil {
+				_ = json.NewEncoder(w).Encode(parsed)
+				return
+			}
+		}
+	}
+
+	// Template predeterminado basado en "Presupuesto - R1 personalizados"
+	defaultTemplate := map[string]any{
+		"basePdf":     "/templates/presupuesto_base.pdf",
+		"pageSize":    "A4",
+		"orientation": "portrait",
+		"schemas": []any{
+			// Hoja 1: Portada (sin campos dinámicos sobreimpresos)
+			[]any{},
+			// Hoja 2: Presupuesto Oficial con todos los campos mapeados
+			[]any{
+				map[string]any{
+					"name":      "cliente_nombre",
+					"type":      "text",
+					"position":  map[string]any{"x": 33, "y": 42},
+					"width":     65,
+					"height":    5,
+					"fontSize":  9,
+					"fontColor": "#0f172a",
+				},
+				map[string]any{
+					"name":      "cliente_ruc",
+					"type":      "text",
+					"position":  map[string]any{"x": 33, "y": 47},
+					"width":     65,
+					"height":    5,
+					"fontSize":  9,
+					"fontColor": "#0f172a",
+				},
+				map[string]any{
+					"name":      "validez_fecha",
+					"type":      "text",
+					"position":  map[string]any{"x": 38, "y": 52},
+					"width":     65,
+					"height":    5,
+					"fontSize":  9,
+					"fontColor": "#0f172a",
+				},
+				map[string]any{
+					"name":      "fecha_emision",
+					"type":      "text",
+					"position":  map[string]any{"x": 128, "y": 42},
+					"width":     55,
+					"height":    5,
+					"fontSize":  9,
+					"fontColor": "#0f172a",
+				},
+				map[string]any{
+					"name":      "cliente_telefono",
+					"type":      "text",
+					"position":  map[string]any{"x": 128, "y": 47},
+					"width":     55,
+					"height":    5,
+					"fontSize":  9,
+					"fontColor": "#0f172a",
+				},
+				map[string]any{
+					"name":      "numero_presupuesto",
+					"type":      "text",
+					"position":  map[string]any{"x": 138, "y": 52},
+					"width":     50,
+					"height":    5,
+					"fontSize":  9,
+					"fontColor": "#0f172a",
+				},
+				map[string]any{
+					"name":     "articulos_tabla",
+					"type":     "table",
+					"position": map[string]any{"x": 20, "y": 62},
+					"width":    170,
+					"height":   50,
+				},
+				map[string]any{
+					"name":      "subtotal",
+					"type":      "text",
+					"position":  map[string]any{"x": 145, "y": 120},
+					"width":     45,
+					"height":    5,
+					"fontSize":  9,
+					"alignment": "right",
+					"fontColor": "#0f172a",
+				},
+				map[string]any{
+					"name":      "monto_descuento",
+					"type":      "text",
+					"position":  map[string]any{"x": 145, "y": 125},
+					"width":     45,
+					"height":    5,
+					"fontSize":  9,
+					"alignment": "right",
+					"fontColor": "#dc2626",
+				},
+				map[string]any{
+					"name":      "total_final",
+					"type":      "text",
+					"position":  map[string]any{"x": 140, "y": 132},
+					"width":     50,
+					"height":    8,
+					"fontSize":  11,
+					"alignment": "right",
+					"fontColor": "#ffffff",
+				},
+				map[string]any{
+					"name":       "terminos_condiciones",
+					"type":       "text",
+					"position":   map[string]any{"x": 20, "y": 230},
+					"width":      170,
+					"height":     30,
+					"fontSize":   7.5,
+					"lineHeight": 1.25,
+					"fontColor":  "#334155",
+				},
+			},
+			// Hoja 3: Fotos de Productos (grilla dinámica)
+			[]any{
+				map[string]any{
+					"name":     "foto_producto_1",
+					"type":     "image",
+					"position": map[string]any{"x": 30, "y": 35},
+					"width":    65,
+					"height":   55,
+				},
+				map[string]any{
+					"name":     "foto_producto_2",
+					"type":     "image",
+					"position": map[string]any{"x": 115, "y": 35},
+					"width":    65,
+					"height":   55,
+				},
+				map[string]any{
+					"name":     "foto_producto_3",
+					"type":     "image",
+					"position": map[string]any{"x": 30, "y": 105},
+					"width":    65,
+					"height":   55,
+				},
+				map[string]any{
+					"name":     "foto_producto_4",
+					"type":     "image",
+					"position": map[string]any{"x": 115, "y": 105},
+					"width":    65,
+					"height":   55,
+				},
+				map[string]any{
+					"name":     "foto_producto_5",
+					"type":     "image",
+					"position": map[string]any{"x": 30, "y": 175},
+					"width":    65,
+					"height":   55,
+				},
+			},
+		},
+	}
+
+	_ = json.NewEncoder(w).Encode(defaultTemplate)
+}
+
+func (h *ConfiguracionHandler) SaveBudgetTemplate(w http.ResponseWriter, r *http.Request) {
+	if h.DB == nil {
+		auth.WriteJSONError(w, http.StatusServiceUnavailable, "base de datos no conectada")
+		return
+	}
+
+	var payload any
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		auth.WriteJSONError(w, http.StatusBadRequest, "formato JSON inválido para la plantilla")
+		return
+	}
+
+	bytes, err := json.Marshal(payload)
+	if err != nil {
+		auth.WriteJSONError(w, http.StatusBadRequest, "error al codificar la plantilla")
+		return
+	}
+
+	_, err = h.DB.ExecContext(r.Context(), `
+		INSERT INTO configuraciones (clave, valor)
+		VALUES ('budget_template', ?)
+		ON DUPLICATE KEY UPDATE valor = VALUES(valor)
+	`, string(bytes))
+	if err != nil {
+		auth.WriteJSONError(w, http.StatusInternalServerError, "error al guardar plantilla: "+err.Error())
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"status":  "ok",
+		"message": "Plantilla de presupuesto guardada con éxito",
+	})
+}
+
+// ----------------------------------------------------------------------------
 // 2. Perfil de Usuario
 // ----------------------------------------------------------------------------
 

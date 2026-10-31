@@ -8,10 +8,10 @@ import { renderPerfilesMensajesModule } from './perfiles-mensajes.js?v=20261030_
 import { renderSesionesWhatsAppModule } from './sesiones-whatsapp.js?v=20261030_8';
 import { renderDifusionMensajesModule } from './difusion-mensajes.js?v=20261030_8';
 import { renderReciclajeModule } from './reciclaje.js?v=20261030_10';
-import { renderConfiguracionModule } from './configuracion.js?v=20261030_10';
+import { renderConfiguracionModule } from './configuracion.js?v=20261031_4';
 import { renderProductosModule } from './productos.js?v=20261030_10';
 import { renderPedidosModule } from './pedidos.js?v=20261031_3';
-import { renderPagosModule } from './pagos.js?v=20261031_3';
+import { renderPagosModule } from './pagos.js?v=20261031_5';
 import {
   subscribeQueue,
   formatRemainingDuration,

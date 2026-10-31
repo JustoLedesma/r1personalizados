@@ -38,12 +38,19 @@ type Pago struct {
 }
 
 type PagoStats struct {
-	Total          int     `json:"total"`
-	Pendientes     int     `json:"pendientes"`
-	PagadosHoy     int     `json:"pagadosHoy"`
-	PagadosSemana  int     `json:"pagadosSemana"`
-	PagadosMes     int     `json:"pagadosMes"`
-	MontoPendiente float64 `json:"montoPendiente"`
-	MontoPagado    float64 `json:"montoPagado"`
+	Total             int     `json:"total"`
+	Pendientes        int     `json:"pendientes"`
+	PagadosHoy        int     `json:"pagadosHoy"`
+	PagadosSemana     int     `json:"pagadosSemana"`
+	PagadosMes        int     `json:"pagadosMes"`
+	MontoTotal        float64 `json:"montoTotal"`
+	MontoPendiente    float64 `json:"montoPendiente"`
+	MontoPagado       float64 `json:"montoPagado"`
+	MontoHoy          float64 `json:"montoHoy"`
+	MontoSemana       float64 `json:"montoSemana"`
+	MontoMes          float64 `json:"montoMes"`
+	MontoPagadoHoy    float64 `json:"montoPagadoHoy"`
+	MontoPagadoSemana float64 `json:"montoPagadoSemana"`
+	MontoPagadoMes    float64 `json:"montoPagadoMes"`
 }
 

@@ -460,3 +460,78 @@ CREATE TABLE IF NOT EXISTS `pagos` (
 
 
 
+
+
+-- ============================================================================
+-- Módulo: Presupuestos Comerciales y Plantillas @pdfme
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS `presupuestos` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `numero_presupuesto` VARCHAR(50) NOT NULL UNIQUE,
+  `fecha_emision` DATE NOT NULL,
+  `validez_dias` INT NOT NULL DEFAULT 15,
+  `validez_fecha` VARCHAR(60) NOT NULL,
+  `estado` ENUM('Borrador', 'Pendiente', 'Aprobado', 'Rechazado', 'Vencido') NOT NULL DEFAULT 'Pendiente',
+  `cliente_id` INT NULL,
+  `cliente_nombre` VARCHAR(150) NOT NULL,
+  `cliente_ruc` VARCHAR(50) NULL,
+  `cliente_telefono` VARCHAR(60) NULL,
+  `cliente_email` VARCHAR(150) NULL,
+  `cliente_direccion` VARCHAR(255) NULL,
+  `subtotal` DECIMAL(15,2) NOT NULL DEFAULT 0,
+  `porcentaje_descuento` DECIMAL(5,2) NOT NULL DEFAULT 0,
+  `monto_descuento` DECIMAL(15,2) NOT NULL DEFAULT 0,
+  `total_final` DECIMAL(15,2) NOT NULL DEFAULT 0,
+  `observaciones` TEXT NULL,
+  `terminos_condiciones` JSON NULL,
+  `created_by` VARCHAR(150) NULL DEFAULT NULL,
+  `deleted_at` DATETIME NULL DEFAULT NULL,
+  `deleted_by` VARCHAR(150) NULL DEFAULT NULL,
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX `idx_presupuestos_numero` (`numero_presupuesto`),
+  INDEX `idx_presupuestos_cliente` (`cliente_id`),
+  INDEX `idx_presupuestos_fecha` (`fecha_emision`),
+  INDEX `idx_presupuestos_deleted` (`deleted_at`),
+  CONSTRAINT `fk_presupuestos_cliente` FOREIGN KEY (`cliente_id`) REFERENCES `clientes`(`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `presupuesto_items` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `presupuesto_id` INT NOT NULL,
+  `producto_id` INT NULL,
+  `descripcion` VARCHAR(255) NOT NULL,
+  `precio_unitario` DECIMAL(15,2) NOT NULL DEFAULT 0,
+  `cantidad` INT NOT NULL DEFAULT 1,
+  `total` DECIMAL(15,2) NOT NULL DEFAULT 0,
+  `imagen_url` VARCHAR(255) NULL,
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX `idx_presupuesto_items_presupuesto` (`presupuesto_id`),
+  INDEX `idx_presupuesto_items_producto` (`producto_id`),
+  CONSTRAINT `fk_presupuesto_items_presupuesto` FOREIGN KEY (`presupuesto_id`) REFERENCES `presupuestos`(`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_presupuesto_items_producto` FOREIGN KEY (`producto_id`) REFERENCES `productos`(`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Registro de Presupuesto Oficial de Ejemplo PRES-2026-0003
+INSERT IGNORE INTO `presupuestos` (
+  `id`, `numero_presupuesto`, `fecha_emision`, `validez_dias`, `validez_fecha`, `estado`,
+  `cliente_nombre`, `cliente_ruc`, `cliente_telefono`, `cliente_email`, `cliente_direccion`,
+  `subtotal`, `porcentaje_descuento`, `monto_descuento`, `total_final`, `terminos_condiciones`
+) VALUES (
+  3, 'PRES-2026-0003', '2026-10-24', 15, '08/11/2026 (15 días)', 'Aprobado',
+  'Zunilda Ledesma', '727424', '+595986901117', 'zunilda@example.com', 'Presidente Franco, Paraguay',
+  3275000, 2.30, 75000, 3200000,
+  JSON_ARRAY(
+    '1. Validez de la oferta: Este presupuesto tiene una validez de 15 días corridos a partir de su fecha de emisión.',
+    '2. Condiciones de pago: El pedido se confirma con la entrega del 60%, por medio de efectivo o transferencia bancaria.',
+    '3. Plazos de entrega: Tiempo estimado de 3 a 5 días hábiles posterior a la aprobación del diseño y confirmación de seña.',
+    '4. Garantía y cambios: Tratándose de artículos personalizados, no se admiten cancelaciones una vez iniciada la producción.'
+  )
+);
+
+INSERT IGNORE INTO `presupuesto_items` (`id`, `presupuesto_id`, `descripcion`, `precio_unitario`, `cantidad`, `total`, `imagen_url`) VALUES
+  (1, 3, 'Taza para Bebe', 50000.00, 10, 500000.00, '/logo/R1.png'),
+  (2, 3, 'Taza Especial Sublimada R1', 150000.00, 10, 1500000.00, '/logo/R1.png'),
+  (3, 3, 'Taza Magica Sublimada 350ml', 45000.00, 10, 450000.00, '/logo/R1.png'),
+  (4, 3, 'Kepis', 55000.00, 15, 825000.00, '/logo/R1.png');
