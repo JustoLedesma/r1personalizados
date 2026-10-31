@@ -180,7 +180,6 @@ func (h *PedidosHandler) List(w http.ResponseWriter, r *http.Request) {
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
 	estado := strings.TrimSpace(r.URL.Query().Get("estado"))
 	financiero := strings.TrimSpace(r.URL.Query().Get("financiero"))
-	semanaStr := strings.TrimSpace(r.URL.Query().Get("semana"))
 
 	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
 	if page < 1 {
@@ -210,10 +209,27 @@ func (h *PedidosHandler) List(w http.ResponseWriter, r *http.Request) {
 		args = append(args, estado)
 	}
 
-	if semanaStr != "" {
-		if sem, err := strconv.Atoi(semanaStr); err == nil && sem > 0 {
+	semanasStr := strings.TrimSpace(r.URL.Query().Get("semanas"))
+	if semanasStr == "" {
+		semanasStr = strings.TrimSpace(r.URL.Query().Get("semana"))
+	}
+	if semanasStr != "" {
+		parts := strings.Split(semanasStr, ",")
+		var semNums []any
+		var placeholders []string
+		for _, p := range parts {
+			p = strings.TrimSpace(p)
+			if sem, err := strconv.Atoi(p); err == nil && sem > 0 {
+				semNums = append(semNums, sem)
+				placeholders = append(placeholders, "?")
+			}
+		}
+		if len(semNums) == 1 {
 			whereClauses = append(whereClauses, "p.semana_iso = ?")
-			args = append(args, sem)
+			args = append(args, semNums[0])
+		} else if len(semNums) > 1 {
+			whereClauses = append(whereClauses, fmt.Sprintf("p.semana_iso IN (%s)", strings.Join(placeholders, ",")))
+			args = append(args, semNums...)
 		}
 	}
 
@@ -324,16 +340,21 @@ func (h *PedidosHandler) List(w http.ResponseWriter, r *http.Request) {
 	// Obtener contadores para las tarjetas
 	stats := h.getStats(r.Context())
 
+	// Total de semanas ISO del año actual (52 o 53)
+	lastDayOfYear := time.Date(now.Year(), 12, 28, 0, 0, 0, 0, time.Local)
+	_, totalSemanasAnio := lastDayOfYear.ISOWeek()
+
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	_ = json.NewEncoder(w).Encode(map[string]any{
-		"data":         pedidos,
-		"page":         page,
-		"page_size":    pageSize,
-		"total":        total,
-		"stats":        stats,
-		"fechaHoy":     fechaHoyFormatted,
-		"semanaActual": semanaActual,
-		"anioActual":   anioActual,
+		"data":             pedidos,
+		"page":             page,
+		"page_size":        pageSize,
+		"total":            total,
+		"stats":            stats,
+		"fechaHoy":         fechaHoyFormatted,
+		"semanaActual":     semanaActual,
+		"totalSemanasAnio": totalSemanasAnio,
+		"anioActual":       anioActual,
 	})
 }
 

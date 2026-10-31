@@ -74,7 +74,7 @@ function createIOSToggle({ label = '', checked = false, onChange = null, activeC
   wrap.className = 'inline-flex items-center gap-2.5 cursor-pointer select-none';
 
   const isEmerald = activeColor === 'emerald';
-  const activeBg = isEmerald ? 'bg-emerald-500' : 'bg-brand';
+  const activeBg = isEmerald ? 'bg-emerald-500' : (activeColor === 'blue' ? 'bg-blue-600' : 'bg-brand');
 
   wrap.innerHTML = `
     <span class="text-xs font-semibold text-slate-700 dark:text-slate-300">${escapeHtml(label)}</span>
@@ -113,10 +113,13 @@ export function renderPedidosModule(container) {
       q: '',
       estado: '', // '' = Todos, 'Creado', 'En Producción', 'En Pausa', 'Listo', 'Cancelado'
       financiero: 'todos', // 'todos', 'cobros_hoy', 'cobros_semanales', 'cobros_mes', 'pagos_pendientes', 'saldos_pendientes'
-      semana: '',
+      semanas: [], // Array de números de semana seleccionadas (Ctrl para selección múltiple)
       page: 1,
       pageSize: 20,
     },
+    totalSemanasAnio: 52,
+    anioActual: new Date().getFullYear(),
+    showWeeklyFilter: false, // Por defecto oculto
 
     // Datos del listado
     items: [],
@@ -183,7 +186,9 @@ export function renderPedidosModule(container) {
       if (state.filters.q) params.set('q', state.filters.q);
       if (state.filters.estado) params.set('estado', state.filters.estado);
       if (state.filters.financiero) params.set('financiero', state.filters.financiero);
-      if (state.filters.semana) params.set('semana', state.filters.semana);
+      if (Array.isArray(state.filters.semanas) && state.filters.semanas.length > 0) {
+        params.set('semanas', state.filters.semanas.join(','));
+      }
       params.set('page', String(state.filters.page));
       params.set('page_size', String(state.filters.pageSize));
 
@@ -194,6 +199,8 @@ export function renderPedidosModule(container) {
         if (res.stats) state.stats = res.stats;
         if (res.fechaHoy) state.fechaHoy = res.fechaHoy;
         if (res.semanaActual) state.semanaActual = res.semanaActual;
+        if (res.totalSemanasAnio) state.totalSemanasAnio = res.totalSemanasAnio;
+        if (res.anioActual) state.anioActual = res.anioActual;
       }
     } catch (err) {
       console.warn('[Pedidos] Error al cargar lista:', err);
@@ -336,6 +343,175 @@ export function renderPedidosModule(container) {
 
     finCard.append(finTitle, finChips);
     parent.appendChild(finCard);
+
+    // 2.1 Filtro Semanal (Tira larga de semanas ISO con selección múltiple con CTRL y Switch Mostrar/Ocultar)
+    const weekCard = document.createElement('div');
+    weekCard.className =
+      'p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-3';
+
+    const weekCardHeader = document.createElement('div');
+    weekCardHeader.className = `flex flex-col sm:flex-row sm:items-center justify-between gap-3 transition-all ${
+      state.showWeeklyFilter ? 'pb-2 border-b border-slate-100 dark:border-slate-800/80' : ''
+    }`;
+
+    const selectedCount = state.filters.semanas.length;
+    let badgeHtml = '';
+    if (selectedCount === 1) {
+      badgeHtml = `<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-brand/10 text-brand text-xs font-bold border border-brand/30">Semana ${state.filters.semanas[0]}</span>`;
+    } else if (selectedCount > 1) {
+      badgeHtml = `<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-brand/10 text-brand text-xs font-bold border border-brand/30">${selectedCount} semanas</span>`;
+    }
+
+    const headerLeft = document.createElement('div');
+    headerLeft.className = 'flex items-center gap-3';
+    headerLeft.innerHTML = `
+      <div class="w-8 h-8 rounded-xl bg-brand-soft/70 dark:bg-brand/15 text-brand flex items-center justify-center text-sm shrink-0">
+        <i class="fa-regular fa-calendar-days"></i>
+      </div>
+      <div>
+        <div class="flex items-center gap-2">
+          <h2 class="text-xs sm:text-sm font-bold text-slate-900 dark:text-white">Filtro Semanal</h2>
+          <span class="text-[10px] uppercase font-mono font-bold text-slate-400">Año ${state.anioActual || 2026}</span>
+          ${badgeHtml}
+        </div>
+        <p class="text-[11px] text-slate-400">
+          Filtro secundario por semana. Mantén presionada la tecla <strong>CTRL</strong> para seleccionar dos o más semanas a la vez.
+        </p>
+      </div>
+    `;
+
+    const headerRight = document.createElement('div');
+    headerRight.className = 'flex items-center gap-3 shrink-0';
+
+    if (selectedCount > 0) {
+      const resetBtn = createButton({
+        text: 'Todas',
+        icon: 'fa-solid fa-rotate-left',
+        variant: 'cancel',
+        size: 'sm',
+        onClick: () => {
+          state.filters.semanas = [];
+          state.filters.page = 1;
+          fetchPedidos();
+        },
+      });
+      headerRight.appendChild(resetBtn);
+    }
+
+    // Switch iOS para mostrar / ocultar el filtro semanal (oculto por defecto)
+    const toggleWeekFilter = createIOSToggle({
+      label: 'Mostrar filtro semanal',
+      checked: Boolean(state.showWeeklyFilter),
+      activeColor: 'blue',
+      onChange: (checked) => {
+        state.showWeeklyFilter = checked;
+        if (checked) {
+          weekCardHeader.classList.add('pb-2', 'border-b', 'border-slate-100', 'dark:border-slate-800/80');
+          stripWrap.classList.remove('hidden');
+          setTimeout(() => {
+            const currentEl = strip.querySelector('[data-current="true"]');
+            if (currentEl) {
+              currentEl.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' });
+            }
+          }, 50);
+        } else {
+          weekCardHeader.classList.remove('pb-2', 'border-b', 'border-slate-100', 'dark:border-slate-800/80');
+          stripWrap.classList.add('hidden');
+        }
+      },
+    });
+    headerRight.appendChild(toggleWeekFilter.element);
+
+    weekCardHeader.append(headerLeft, headerRight);
+
+    // Tira horizontal de semanas (oculta por defecto si showWeeklyFilter es false)
+    const stripWrap = document.createElement('div');
+    stripWrap.className = `relative flex items-center pt-1 transition-all ${
+      state.showWeeklyFilter ? '' : 'hidden'
+    }`;
+
+    const strip = document.createElement('div');
+    strip.className =
+      'flex items-center gap-1.5 overflow-x-auto pb-2 pt-1 w-full scrollbar-thin select-none scroll-smooth';
+
+    const totalWeeks = state.totalSemanasAnio || 52;
+    const currentWeekNum = state.semanaActual || 1;
+
+    for (let w = 1; w <= totalWeeks; w++) {
+      const isCurrentWeek = w === currentWeekNum;
+      const isEnabled = w <= currentWeekNum;
+      const isSelected = state.filters.semanas.includes(w);
+
+      const weekBtn = document.createElement('button');
+      weekBtn.type = 'button';
+
+      if (!isEnabled) {
+        // Semanas futuras deshabilitadas
+        weekBtn.disabled = true;
+        weekBtn.className =
+          'shrink-0 px-2.5 py-1.5 rounded-xl border border-dashed border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/40 text-slate-300 dark:text-slate-600 text-xs font-mono opacity-40 cursor-not-allowed flex items-center gap-1';
+        weekBtn.title = `Semana ${w} (Futura / No disponible)`;
+        weekBtn.innerHTML = `<span>S${w}</span>`;
+      } else {
+        // Semanas habilitadas
+        if (isCurrentWeek) {
+          weekBtn.setAttribute('data-current', 'true');
+        }
+
+        weekBtn.className = `shrink-0 px-2.5 py-1.5 rounded-xl text-xs font-semibold transition cursor-pointer flex items-center gap-1 ${
+          isSelected
+            ? 'bg-brand text-white font-black shadow-xs ring-2 ring-brand/40 border border-brand'
+            : isCurrentWeek
+            ? 'bg-brand/10 dark:bg-brand/20 text-brand font-bold border border-brand/50 hover:bg-brand/20'
+            : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200/80 dark:border-slate-700 hover:bg-slate-200 dark:hover:bg-slate-700'
+        }`;
+
+        weekBtn.title = `Semana ${w}${isCurrentWeek ? ' (Semana Actual)' : ''} · Clic para filtrar / Ctrl+Clic para selección múltiple`;
+        weekBtn.innerHTML = `
+          <span class="font-mono">S${w}</span>
+          ${isCurrentWeek ? '<span class="text-[9px] uppercase px-1 py-0.2 rounded bg-brand/20 text-brand font-black ml-0.5">Hoy</span>' : ''}
+        `;
+
+        weekBtn.addEventListener('click', (e) => {
+          const isMulti = e.ctrlKey || e.metaKey;
+          let currentSet = new Set(state.filters.semanas);
+
+          if (isMulti) {
+            if (currentSet.has(w)) {
+              currentSet.delete(w);
+            } else {
+              currentSet.add(w);
+            }
+          } else {
+            if (currentSet.has(w) && currentSet.size === 1) {
+              currentSet.clear();
+            } else {
+              currentSet = new Set([w]);
+            }
+          }
+
+          state.filters.semanas = Array.from(currentSet).sort((a, b) => a - b);
+          state.filters.page = 1;
+          fetchPedidos();
+        });
+      }
+
+      strip.appendChild(weekBtn);
+    }
+
+    stripWrap.appendChild(strip);
+    weekCard.append(weekCardHeader, stripWrap);
+    parent.appendChild(weekCard);
+
+    // Auto-scroll centrado a la semana actual al estar visible
+    if (state.showWeeklyFilter) {
+      setTimeout(() => {
+        const currentEl = strip.querySelector('[data-current="true"]');
+        if (currentEl) {
+          currentEl.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' });
+        }
+      }, 60);
+    }
 
     // 3. Tarjetas Contadoras por Estado (6 tarjetas con contadores reales)
     const cardsGrid = document.createElement('div');

@@ -10,7 +10,7 @@ import { renderDifusionMensajesModule } from './difusion-mensajes.js?v=20261030_
 import { renderReciclajeModule } from './reciclaje.js?v=20261030_10';
 import { renderConfiguracionModule } from './configuracion.js?v=20261030_10';
 import { renderProductosModule } from './productos.js?v=20261030_10';
-import { renderPedidosModule } from './pedidos.js?v=20261030_13';
+import { renderPedidosModule } from './pedidos.js?v=20261030_15';
 import {
   subscribeQueue,
   formatRemainingDuration,
