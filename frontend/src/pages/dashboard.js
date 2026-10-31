@@ -7,9 +7,10 @@ import { renderProveedoresModule } from './proveedores.js?v=20261030_8';
 import { renderPerfilesMensajesModule } from './perfiles-mensajes.js?v=20261030_8';
 import { renderSesionesWhatsAppModule } from './sesiones-whatsapp.js?v=20261030_8';
 import { renderDifusionMensajesModule } from './difusion-mensajes.js?v=20261030_8';
-import { renderReciclajeModule } from './reciclaje.js?v=20261030_8';
-import { renderConfiguracionModule } from './configuracion.js?v=20261030_8';
-import { renderProductosModule } from './productos.js?v=20261030_8';
+import { renderReciclajeModule } from './reciclaje.js?v=20261030_10';
+import { renderConfiguracionModule } from './configuracion.js?v=20261030_10';
+import { renderProductosModule } from './productos.js?v=20261030_10';
+import { renderPedidosModule } from './pedidos.js?v=20261030_13';
 import {
   subscribeQueue,
   formatRemainingDuration,
@@ -407,7 +408,9 @@ export function renderDashboardLayout(container, { user, activeModule = 'dashboa
   container.appendChild(shell);
 
   try {
-    if (currentMod.id === 'clientes') {
+    if (currentMod.id === 'pedidos') {
+      renderPedidosModule(mainArea);
+    } else if (currentMod.id === 'clientes') {
       renderClientesModule(mainArea);
     } else if (currentMod.id === 'proveedor') {
       renderProveedoresModule(mainArea);

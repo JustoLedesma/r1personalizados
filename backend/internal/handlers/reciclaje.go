@@ -3,6 +3,7 @@ package handlers
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"sort"
 	"strconv"
@@ -536,6 +537,59 @@ func (h *ReciclajeHandler) List(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// 9. Pedidos en reciclaje
+	if modulo == "" || modulo == "pedidos" || modulo == "pedido" {
+		rows, err := h.DB.QueryContext(r.Context(), `
+			SELECT
+				id, numero_pedido, cliente_nombre, COALESCE(cliente_telefono, ''),
+				condicion_venta, monto_total, estado, semana_iso,
+				created_at, updated_at, COALESCE(deleted_by, 'Operador Ventas'), deleted_at
+			FROM pedidos
+			WHERE deleted_at IS NOT NULL
+			ORDER BY deleted_at DESC
+		`)
+		if err == nil {
+			for rows.Next() {
+				var (
+					id, semISO                               int
+					numPed, cliNom, cliTel, cond, est, delBy string
+					monto                                    float64
+					created, updated, delAt                  time.Time
+				)
+				if err := rows.Scan(
+					&id, &numPed, &cliNom, &cliTel, &cond, &monto, &est, &semISO,
+					&created, &updated, &delBy, &delAt,
+				); err == nil {
+					campos := []RecycleField{
+						{Label: "N° Pedido", Value: numPed},
+						{Label: "Cliente", Value: cliNom},
+						{Label: "Teléfono", Value: cliTel},
+						{Label: "Condición", Value: cond},
+						{Label: "Monto Total", Value: fmt.Sprintf("%.0f Gs.", monto)},
+						{Label: "Semana", Value: fmt.Sprintf("Semana %d", semISO)},
+						{Label: "Último Estado", Value: est},
+					}
+					item := RecycleItem{
+						ID:            id,
+						Modulo:        "Pedidos",
+						Identificador: numPed,
+						Nombre:        fmt.Sprintf("Pedido %s - %s", numPed, cliNom),
+						Detalle:       fmt.Sprintf("Cliente: %s · Total: %.0f Gs.", cliNom, monto),
+						CreatedAt:     created,
+						UpdatedAt:     updated,
+						DeletedBy:     delBy,
+						DeletedAt:     delAt,
+						Campos:        campos,
+					}
+					if q == "" || matchesRecycleSearch(item, q) {
+						allItems = append(allItems, item)
+					}
+				}
+			}
+			rows.Close()
+		}
+	}
+
 	sort.Slice(allItems, func(i, j int) bool {
 		return allItems[i].DeletedAt.After(allItems[j].DeletedAt)
 	})
@@ -635,6 +689,12 @@ func (h *ReciclajeHandler) Restore(w http.ResponseWriter, r *http.Request) {
 		_, err := h.DB.ExecContext(r.Context(), "UPDATE productos SET deleted_at = NULL, deleted_by = NULL WHERE id = ?", req.ID)
 		if err != nil {
 			auth.WriteJSONError(w, http.StatusInternalServerError, "no se pudo restaurar el producto")
+			return
+		}
+	case "pedidos", "pedido":
+		_, err := h.DB.ExecContext(r.Context(), "UPDATE pedidos SET deleted_at = NULL, deleted_by = NULL WHERE id = ?", req.ID)
+		if err != nil {
+			auth.WriteJSONError(w, http.StatusInternalServerError, "no se pudo restaurar el pedido")
 			return
 		}
 	default:

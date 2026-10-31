@@ -22,7 +22,10 @@ func envOrDefault(key, def string) string {
 // Connect lee la configuración desde variables de entorno, arma el DSN,
 // abre sql.DB con pool configurado y hace Ping() al iniciar.
 func Connect() (*sql.DB, error) {
-	host := envOrDefault("DB_HOST", "localhost")
+	host := envOrDefault("DB_HOST", "127.0.0.1")
+	if host == "localhost" {
+		host = "127.0.0.1"
+	}
 	port := envOrDefault("DB_PORT", "3306")
 	user := envOrDefault("DB_USER", "root")
 	password := os.Getenv("DB_PASSWORD")

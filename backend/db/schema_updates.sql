@@ -311,4 +311,95 @@ CREATE TABLE IF NOT EXISTS `productos` (
   CONSTRAINT `fk_productos_unidad` FOREIGN KEY (`unidad_medida_id`) REFERENCES `unidades_medida`(`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- ============================================================================
+-- Módulo: Pedidos con soporte para Reciclaje, Ítems y Proveedores
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS `pedidos` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `numero_pedido` VARCHAR(50) NOT NULL UNIQUE,
+  `cliente_id` INT NULL,
+  `cliente_casual` TINYINT(1) NOT NULL DEFAULT 0,
+  `cliente_nombre` VARCHAR(200) NOT NULL,
+  `cliente_telefono` VARCHAR(60) NULL,
+  `cliente_documento` VARCHAR(60) NULL,
+  `cliente_direccion` VARCHAR(255) NULL,
+  `condicion_venta` ENUM('Contado', 'Credito') NOT NULL DEFAULT 'Contado',
+  `tipo_pago` ENUM('Total', 'Parcial') NULL DEFAULT NULL,
+  `fecha_cobro` DATE NULL DEFAULT NULL,
+  `monto_total` DECIMAL(15,2) NOT NULL DEFAULT 0,
+  `monto_pagado` DECIMAL(15,2) NOT NULL DEFAULT 0,
+  `saldo_pendiente` DECIMAL(15,2) NOT NULL DEFAULT 0,
+  `modalidad_entrega` VARCHAR(80) NOT NULL DEFAULT 'Retiro en Local',
+  `modalidad_entrega_otro` VARCHAR(255) NULL,
+  `estado` ENUM('Creado', 'En Producción', 'En Pausa', 'Listo', 'Cancelado') NOT NULL DEFAULT 'Creado',
+  `semana_iso` INT NOT NULL,
+  `anio_iso` INT NOT NULL,
+  `notas_produccion` TEXT NULL,
+  `deleted_at` DATETIME NULL DEFAULT NULL,
+  `deleted_by` VARCHAR(150) NULL DEFAULT NULL,
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX `idx_pedidos_numero` (`numero_pedido`),
+  INDEX `idx_pedidos_cliente` (`cliente_id`),
+  INDEX `idx_pedidos_estado` (`estado`),
+  INDEX `idx_pedidos_condicion` (`condicion_venta`),
+  INDEX `idx_pedidos_fecha_cobro` (`fecha_cobro`),
+  INDEX `idx_pedidos_semana` (`semana_iso`, `anio_iso`),
+  INDEX `idx_pedidos_deleted_at` (`deleted_at`),
+  CONSTRAINT `fk_pedidos_cliente` FOREIGN KEY (`cliente_id`) REFERENCES `clientes`(`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `pedido_items` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `pedido_id` INT NOT NULL,
+  `producto_id` INT NULL,
+  `es_no_registrado` TINYINT(1) NOT NULL DEFAULT 0,
+  `nombre_producto` VARCHAR(255) NOT NULL,
+  `sku` VARCHAR(100) NULL,
+  `cantidad` DECIMAL(12,2) NOT NULL DEFAULT 1,
+  `precio_unitario` DECIMAL(15,2) NOT NULL DEFAULT 0,
+  `subtotal` DECIMAL(15,2) NOT NULL DEFAULT 0,
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX `idx_pedido_items_pedido` (`pedido_id`),
+  INDEX `idx_pedido_items_producto` (`producto_id`),
+  CONSTRAINT `fk_pedido_items_pedido` FOREIGN KEY (`pedido_id`) REFERENCES `pedidos`(`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_pedido_items_producto` FOREIGN KEY (`producto_id`) REFERENCES `productos`(`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `pedido_proveedores` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `pedido_id` INT NOT NULL,
+  `proveedor_id` INT NULL,
+  `es_no_registrado` TINYINT(1) NOT NULL DEFAULT 0,
+  `nombre_proveedor` VARCHAR(200) NOT NULL,
+  `cantidad` DECIMAL(12,2) NOT NULL DEFAULT 1,
+  `costo` DECIMAL(15,2) NOT NULL DEFAULT 0,
+  `subtotal` DECIMAL(15,2) NOT NULL DEFAULT 0,
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX `idx_pedido_proveedores_pedido` (`pedido_id`),
+  INDEX `idx_pedido_proveedores_proveedor` (`proveedor_id`),
+  CONSTRAINT `fk_pedido_proveedores_pedido` FOREIGN KEY (`pedido_id`) REFERENCES `pedidos`(`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_pedido_proveedores_proveedor` FOREIGN KEY (`proveedor_id`) REFERENCES `proveedores`(`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ============================================================================
+-- Actualización: Campo fecha_pedido en pedidos con asociación a semana_iso
+-- ============================================================================
+ALTER TABLE `pedidos` ADD COLUMN `fecha_pedido` DATE NULL DEFAULT NULL AFTER `condicion_venta`;
+UPDATE `pedidos` SET `fecha_pedido` = DATE(`created_at`) WHERE `fecha_pedido` IS NULL;
+ALTER TABLE `pedidos` ADD INDEX `idx_pedidos_fecha_pedido` (`fecha_pedido`);
+
+-- ============================================================================
+-- Actualización: Fechas de transición de estados e historial en pedidos
+-- ============================================================================
+ALTER TABLE `pedidos` ADD COLUMN `fecha_en_produccion` DATETIME NULL DEFAULT NULL AFTER `estado`;
+ALTER TABLE `pedidos` ADD COLUMN `fecha_en_pausa` DATETIME NULL DEFAULT NULL AFTER `fecha_en_produccion`;
+ALTER TABLE `pedidos` ADD COLUMN `fecha_listo` DATETIME NULL DEFAULT NULL AFTER `fecha_en_pausa`;
+ALTER TABLE `pedidos` ADD COLUMN `historial_estados` JSON NULL DEFAULT NULL AFTER `fecha_listo`;
+
+
+
+
 

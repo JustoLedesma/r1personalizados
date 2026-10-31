@@ -43,6 +43,7 @@ func Run() {
 	reciclajeHandler := handlers.NewReciclajeHandler(dbConn)
 	configuracionHandler := handlers.NewConfiguracionHandler(dbConn)
 	productosHandler := handlers.NewProductosHandler(dbConn)
+	pedidosHandler := handlers.NewPedidosHandler(dbConn)
 
 	mux := http.NewServeMux()
 
@@ -83,6 +84,10 @@ func Run() {
 	mux.HandleFunc("/api/productos", productosHandler.HandleCollection)
 	mux.HandleFunc("/api/productos/check-sku", productosHandler.HandleCheckSKU)
 	mux.HandleFunc("/api/productos/", productosHandler.HandleItem)
+
+	// Rutas del módulo Pedidos
+	mux.HandleFunc("/api/pedidos", pedidosHandler.HandleCollection)
+	mux.HandleFunc("/api/pedidos/", pedidosHandler.HandleItem)
 
 	// Rutas del módulo Reciclaje
 	mux.HandleFunc("/api/reciclaje", reciclajeHandler.List)

@@ -9,6 +9,8 @@ Eres un desarrollador senior full-stack. Este documento es la fuente de verdad: 
 - **Backend:** Go (librería estándar `net/http` o Chi/Gin si ya está en el proyecto; no mezclar routers).
 - **Base de datos:** MySQL/MariaDB en `localhost` (ver sección 2.1); acceso siempre con consultas parametrizadas.
 - **Iconos** font awesome obligatorio, nada de emojis
+- **Switches** todo interruptor (toggle) del sistema debe usar el diseño tipo iOS: pista redondeada tipo píldora con perilla circular blanca; apagado en gris (perilla a la izquierda) y encendido en azul (perilla a la derecha), con transición suave. Aplica a todos los módulos, nuevos y existentes, salvo que el usuario indique otro diseño
+- **Contadores de cantidad** todo campo de cantidad numérica del sistema debe usar un selector con botones: botón "−" a la izquierda, valor numérico centrado y botón "+" a la derecha, con botones cuadrados de fondo gris azulado oscuro e íconos blancos, dentro de un contenedor de bordes redondeados con sombra suave. El mínimo es 1 (o 0 donde corresponda), el valor también se puede escribir directamente, solo acepta números enteros y mantener presionado el botón repite el cambio. Aplica a todos los módulos, nuevos y existentes, salvo que el usuario indique otro diseño
 - **Modulos** cualquier modulo creado debe tomar toda el area asignada salvo que el usuario solicite modal
 - **Notificaciones** Todas las notificaciones deben venir de Flashy.js
 - **Logo azul** logo de color azul, https://netz.com.py/route1/img/header/NETZ-IA.svg obligatorio
