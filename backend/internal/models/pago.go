@@ -1,0 +1,49 @@
+package models
+
+import "time"
+
+type Pago struct {
+	ID                  int        `json:"id"`
+	NumeroPago          string     `json:"numeroPago"`
+	PedidoID            *int       `json:"pedidoId,omitempty"`
+	NumeroPedido        string     `json:"numeroPedido,omitempty"`
+	PedidoProveedorID   *int       `json:"pedidoProveedorId,omitempty"`
+	TipoBeneficiario    string     `json:"tipoBeneficiario"` // 'Proveedor' | 'Cliente'
+	ProveedorID         *int       `json:"proveedorId,omitempty"`
+	ProveedorNombre     string     `json:"proveedorNombre"`
+	ProveedorRUC        string     `json:"proveedorRuc"`
+	EsProveedorTemporal bool       `json:"esProveedorTemporal"`
+	ClienteID           *int       `json:"clienteId,omitempty"`
+	ClienteNombre       string     `json:"clienteNombre"`
+	ClienteDocumento    string     `json:"clienteDocumento"`
+	ClienteTelefono     string     `json:"clienteTelefono"`
+	ProductoID          *int       `json:"productoId,omitempty"`
+	ProductoNombre      string     `json:"productoNombre"`
+	EsProductoTemporal  bool       `json:"esProductoTemporal"`
+	Cantidad            float64    `json:"cantidad"`
+	MontoTotal          float64    `json:"montoTotal"`
+	MontoPagado         float64    `json:"montoPagado"`
+	SaldoPendiente      float64    `json:"saldoPendiente"`
+	EstadoPago          string     `json:"estadoPago"` // 'Pendiente' | 'Pagado' | 'Pago Parcial'
+	MetodoPago          string     `json:"metodoPago"`
+	FechaPago           string     `json:"fechaPago"` // 'YYYY-MM-DD'
+	SemanaISO           int        `json:"semanaIso"`
+	AnioISO             int        `json:"anioIso"`
+	Notas               string     `json:"notas"`
+	CreatedBy           *string    `json:"createdBy,omitempty"`
+	DeletedAt           *time.Time `json:"deletedAt,omitempty"`
+	DeletedBy           *string    `json:"deletedBy,omitempty"`
+	CreatedAt           time.Time  `json:"createdAt"`
+	UpdatedAt           time.Time  `json:"updatedAt"`
+}
+
+type PagoStats struct {
+	Total          int     `json:"total"`
+	Pendientes     int     `json:"pendientes"`
+	PagadosHoy     int     `json:"pagadosHoy"`
+	PagadosSemana  int     `json:"pagadosSemana"`
+	PagadosMes     int     `json:"pagadosMes"`
+	MontoPendiente float64 `json:"montoPendiente"`
+	MontoPagado    float64 `json:"montoPagado"`
+}
+

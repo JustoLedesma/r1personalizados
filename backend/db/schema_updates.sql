@@ -399,6 +399,63 @@ ALTER TABLE `pedidos` ADD COLUMN `fecha_en_pausa` DATETIME NULL DEFAULT NULL AFT
 ALTER TABLE `pedidos` ADD COLUMN `fecha_listo` DATETIME NULL DEFAULT NULL AFTER `fecha_en_pausa`;
 ALTER TABLE `pedidos` ADD COLUMN `historial_estados` JSON NULL DEFAULT NULL AFTER `fecha_listo`;
 
+-- ============================================================================
+-- Actualización: Asociación de Producto y Estado de Pago en pedido_proveedores
+-- ============================================================================
+ALTER TABLE `pedido_proveedores` ADD COLUMN `producto_id` INT NULL DEFAULT NULL AFTER `nombre_proveedor`;
+ALTER TABLE `pedido_proveedores` ADD COLUMN `producto_nombre` VARCHAR(255) NULL DEFAULT NULL AFTER `producto_id`;
+ALTER TABLE `pedido_proveedores` ADD COLUMN `estado_pago` ENUM('Pendiente', 'Pagado', 'Pago Parcial') NOT NULL DEFAULT 'Pendiente' AFTER `subtotal`;
+ALTER TABLE `pedido_proveedores` ADD COLUMN `monto_pagado` DECIMAL(15,2) NOT NULL DEFAULT 0 AFTER `estado_pago`;
+ALTER TABLE `pedido_proveedores` ADD COLUMN `saldo_pendiente` DECIMAL(15,2) NOT NULL DEFAULT 0 AFTER `monto_pagado`;
+
+-- ============================================================================
+-- Módulo: Pagos (Pagos a Proveedores y Clientes con vinculación a Pedidos)
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS `pagos` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `numero_pago` VARCHAR(50) NOT NULL UNIQUE,
+  `pedido_id` INT NULL DEFAULT NULL,
+  `pedido_proveedor_id` INT NULL DEFAULT NULL,
+  `tipo_beneficiario` ENUM('Proveedor', 'Cliente') NOT NULL DEFAULT 'Proveedor',
+  `proveedor_id` INT NULL DEFAULT NULL,
+  `proveedor_nombre` VARCHAR(200) NOT NULL,
+  `proveedor_ruc` VARCHAR(50) NULL DEFAULT NULL,
+  `es_proveedor_temporal` TINYINT(1) NOT NULL DEFAULT 0,
+  `cliente_id` INT NULL DEFAULT NULL,
+  `cliente_nombre` VARCHAR(200) NULL DEFAULT NULL,
+  `cliente_documento` VARCHAR(60) NULL DEFAULT NULL,
+  `cliente_telefono` VARCHAR(60) NULL DEFAULT NULL,
+  `producto_id` INT NULL DEFAULT NULL,
+  `producto_nombre` VARCHAR(255) NOT NULL,
+  `es_producto_temporal` TINYINT(1) NOT NULL DEFAULT 0,
+  `cantidad` DECIMAL(12,2) NOT NULL DEFAULT 1,
+  `monto_total` DECIMAL(15,2) NOT NULL DEFAULT 0,
+  `monto_pagado` DECIMAL(15,2) NOT NULL DEFAULT 0,
+  `saldo_pendiente` DECIMAL(15,2) NOT NULL DEFAULT 0,
+  `estado_pago` ENUM('Pendiente', 'Pagado', 'Pago Parcial') NOT NULL DEFAULT 'Pendiente',
+  `metodo_pago` VARCHAR(60) NOT NULL DEFAULT 'Efectivo',
+  `fecha_pago` DATE NOT NULL,
+  `semana_iso` INT NOT NULL,
+  `anio_iso` INT NOT NULL,
+  `notas` TEXT NULL,
+  `created_by` VARCHAR(150) NULL DEFAULT NULL,
+  `deleted_at` DATETIME NULL DEFAULT NULL,
+  `deleted_by` VARCHAR(150) NULL DEFAULT NULL,
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX `idx_pagos_numero` (`numero_pago`),
+  INDEX `idx_pagos_pedido` (`pedido_id`),
+  INDEX `idx_pagos_pedido_proveedor` (`pedido_proveedor_id`),
+  INDEX `idx_pagos_proveedor` (`proveedor_id`),
+  INDEX `idx_pagos_cliente` (`cliente_id`),
+  INDEX `idx_pagos_estado` (`estado_pago`),
+  INDEX `idx_pagos_fecha` (`fecha_pago`),
+  INDEX `idx_pagos_semana` (`semana_iso`, `anio_iso`),
+  INDEX `idx_pagos_deleted` (`deleted_at`),
+  CONSTRAINT `fk_pagos_pedido` FOREIGN KEY (`pedido_id`) REFERENCES `pedidos`(`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+
 
 
 

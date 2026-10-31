@@ -10,7 +10,8 @@ import { renderDifusionMensajesModule } from './difusion-mensajes.js?v=20261030_
 import { renderReciclajeModule } from './reciclaje.js?v=20261030_10';
 import { renderConfiguracionModule } from './configuracion.js?v=20261030_10';
 import { renderProductosModule } from './productos.js?v=20261030_10';
-import { renderPedidosModule } from './pedidos.js?v=20261030_15';
+import { renderPedidosModule } from './pedidos.js?v=20261031_3';
+import { renderPagosModule } from './pagos.js?v=20261031_3';
 import {
   subscribeQueue,
   formatRemainingDuration,
@@ -410,6 +411,8 @@ export function renderDashboardLayout(container, { user, activeModule = 'dashboa
   try {
     if (currentMod.id === 'pedidos') {
       renderPedidosModule(mainArea);
+    } else if (currentMod.id === 'pagos') {
+      renderPagosModule(mainArea);
     } else if (currentMod.id === 'clientes') {
       renderClientesModule(mainArea);
     } else if (currentMod.id === 'proveedor') {

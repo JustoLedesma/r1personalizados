@@ -1488,6 +1488,7 @@ export function renderPedidosModule(container) {
     // ==========================================================================
     // CARD 2: PRODUCTOS Y CANTIDADES * (con Switch iOS Producto No Registrado y Edición)
     // ==========================================================================
+    let updateProvInputUI = null;
     let isProdNoRegistrado = false;
     let selectedProd = null;
     let editingItemIndex = -1;
@@ -1854,6 +1855,9 @@ export function renderPedidosModule(container) {
       }
 
       itemsTableHolder.appendChild(tableBox);
+      if (typeof updateProvInputUI === 'function') {
+        updateProvInputUI();
+      }
     }
 
     renderItemsTable();
@@ -1864,6 +1868,10 @@ export function renderPedidosModule(container) {
     // ==========================================================================
     let isProvNoRegistrado = false;
     let selectedProv = null;
+    let selectedProvProd = '';
+    let selectedProvProdId = null;
+    let selectedProvEstadoPago = 'Pendiente';
+    let selectedProvMontoPagado = 0;
     let editingProvIndex = -1;
 
     const cardProveedores = document.createElement('div');
@@ -1900,11 +1908,12 @@ export function renderPedidosModule(container) {
     const provInputContainer = document.createElement('div');
     cardProveedores.appendChild(provInputContainer);
 
-    function updateProvInputUI() {
+    updateProvInputUI = function() {
       provInputContainer.innerHTML = '';
       const pGrid = document.createElement('div');
       pGrid.className = 'space-y-3';
 
+      // 1. Selector / Input de Proveedor
       if (!isProvNoRegistrado) {
         // Selector con buscador de proveedores de la base
         const pSelWrap = document.createElement('div');
@@ -1985,9 +1994,61 @@ export function renderPedidosModule(container) {
         pGrid.appendChild(manualPvWrap);
       }
 
-      // Fila: Cantidad Comprada + Costo de Compra + Botón Agregar/Actualizar
+      // 2. Selección de Producto que proveyó este proveedor
+      // Si solo hay 1 producto asignado al cliente/pedido, se selecciona automáticamente con opción de cambio
+      // Si hay varios productos, es obligatorio seleccionar cuál proveyó
+      const itemsCount = state.form.items.length;
+      if (itemsCount === 1 && !selectedProvProd) {
+        selectedProvProd = state.form.items[0].nombreProducto;
+        selectedProvProdId = state.form.items[0].productoId || null;
+      }
+
+      const prodSelectWrap = document.createElement('div');
+      prodSelectWrap.className = 'p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200/80 dark:border-slate-700/80 space-y-1.5';
+      
+      let autoSelectNotice = '';
+      if (itemsCount === 1) {
+        autoSelectNotice = `<span class="text-[11px] text-brand font-semibold ml-2"><i class="fa-solid fa-wand-magic-sparkles mr-1"></i>Auto-seleccionado (único producto en el pedido)</span>`;
+      } else if (itemsCount > 1) {
+        autoSelectNotice = `<span class="text-[11px] text-amber-500 font-semibold ml-2"><i class="fa-solid fa-asterisk mr-1 text-[9px]"></i>Obligatorio: elija el producto</span>`;
+      }
+
+      prodSelectWrap.innerHTML = `
+        <div class="flex items-center justify-between">
+          <label class="block text-xs font-bold text-slate-700 dark:text-slate-300">
+            Producto del Pedido que Proveyó ${autoSelectNotice}
+          </label>
+        </div>
+        <select id="prov-prod-select" class="w-full px-3.5 py-2 text-xs sm:text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-brand cursor-pointer">
+          ${itemsCount === 0 ? '<option value="">(Agregue productos al pedido arriba para asignarlos aquí)</option>' : ''}
+          ${itemsCount > 1 ? '<option value="">-- Seleccione qué producto proveyó este proveedor --</option>' : ''}
+          ${state.form.items.map((it, idx) => {
+            const isMatch = (selectedProvProd && selectedProvProd === it.nombreProducto) || (itemsCount === 1);
+            return `<option value="${idx}" ${isMatch ? 'selected' : ''}>${escapeHtml(it.nombreProducto)} (Cantidad: ${it.cantidad})</option>`;
+          }).join('')}
+        </select>
+      `;
+
+      const prodSelect = prodSelectWrap.querySelector('#prov-prod-select');
+      prodSelect.addEventListener('change', (e) => {
+        const val = e.target.value;
+        if (val === '') {
+          selectedProvProd = '';
+          selectedProvProdId = null;
+        } else {
+          const itemIdx = Number(val);
+          const item = state.form.items[itemIdx];
+          if (item) {
+            selectedProvProd = item.nombreProducto;
+            selectedProvProdId = item.productoId || null;
+          }
+        }
+      });
+      pGrid.appendChild(prodSelectWrap);
+
+      // 3. Fila: Cantidad Comprada + Costo de Compra + Estado de Pago
       const rowPvInputs = document.createElement('div');
-      rowPvInputs.className = 'grid grid-cols-1 sm:grid-cols-3 items-end gap-3';
+      rowPvInputs.className = 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 items-end gap-3';
       rowPvInputs.innerHTML = `
         <div>
           <label class="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Cantidad Comprada</label>
@@ -1995,20 +2056,103 @@ export function renderPedidosModule(container) {
             class="w-full px-3 py-2 text-xs sm:text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-brand" />
         </div>
         <div>
-          <label class="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Costo de Compra (Gs.)</label>
+          <label class="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Costo Unitario (Gs.)</label>
           <input type="text" id="prov-costo" value="${formatGuaranies(selectedProv?.costo || 0)}"
             class="w-full px-3 py-2 text-xs sm:text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-brand font-mono font-bold" />
         </div>
-        <div id="add-prov-btn-holder" class="flex items-center gap-2 justify-end"></div>
+        <div class="sm:col-span-2">
+          <label class="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Estado del Pago al Proveedor</label>
+          <div class="flex items-center gap-2">
+            <button type="button" data-estado="Pendiente" class="prov-estado-btn flex-1 py-2 px-2.5 rounded-xl text-xs font-bold border transition cursor-pointer flex items-center justify-center gap-1.5 ${selectedProvEstadoPago === 'Pendiente' ? 'bg-amber-500 text-white border-amber-500 shadow-xs' : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300'}">
+              <i class="fa-solid fa-clock text-[11px]"></i>
+              <span>Pendiente</span>
+            </button>
+            <button type="button" data-estado="Pagado" class="prov-estado-btn flex-1 py-2 px-2.5 rounded-xl text-xs font-bold border transition cursor-pointer flex items-center justify-center gap-1.5 ${selectedProvEstadoPago === 'Pagado' ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs' : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300'}">
+              <i class="fa-solid fa-check text-[11px]"></i>
+              <span>Pagado</span>
+            </button>
+            <button type="button" data-estado="Pago Parcial" class="prov-estado-btn flex-1 py-2 px-2.5 rounded-xl text-xs font-bold border transition cursor-pointer flex items-center justify-center gap-1.5 ${selectedProvEstadoPago === 'Pago Parcial' ? 'bg-brand text-white border-brand shadow-xs' : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300'}">
+              <i class="fa-solid fa-circle-half-stroke text-[11px]"></i>
+              <span>Pago Parcial</span>
+            </button>
+          </div>
+        </div>
       `;
 
       const costoInp = rowPvInputs.querySelector('#prov-costo');
+      const cantInp = rowPvInputs.querySelector('#prov-cant');
       costoInp.addEventListener('input', (e) => {
         const num = parseGuaranies(e.target.value);
         e.target.value = formatGuaranies(num);
+        updatePartialMath();
+      });
+      cantInp.addEventListener('input', () => {
+        updatePartialMath();
       });
 
-      const pvBtnHolder = rowPvInputs.querySelector('#add-prov-btn-holder');
+      // Contenedor dinámico de Pago Parcial (si se activa Pago Parcial)
+      const partialBox = document.createElement('div');
+      partialBox.id = 'prov-partial-box';
+      partialBox.className = `p-3.5 rounded-xl bg-purple-50 dark:bg-purple-950/30 border border-brand/30 space-y-2 ${selectedProvEstadoPago === 'Pago Parcial' ? '' : 'hidden'}`;
+      partialBox.innerHTML = `
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 items-center">
+          <div>
+            <label class="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Monto Pagado / Abonado (Gs.)</label>
+            <input type="text" id="prov-monto-pagado" value="${formatGuaranies(selectedProvMontoPagado)}"
+              class="w-full px-3 py-2 text-xs sm:text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-brand font-mono font-bold" />
+          </div>
+          <div class="p-2.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex flex-col justify-center">
+            <span class="text-[10px] uppercase font-bold text-slate-500">Saldo Pendiente Calculado</span>
+            <span id="prov-saldo-calc" class="text-sm font-mono font-black text-danger">0 Gs.</span>
+          </div>
+        </div>
+      `;
+
+      const montoPagadoInp = partialBox.querySelector('#prov-monto-pagado');
+      const saldoCalcEl = partialBox.querySelector('#prov-saldo-calc');
+
+      function updatePartialMath() {
+        const cant = Number(cantInp.value) || 1;
+        const costo = parseGuaranies(costoInp.value);
+        const subtotal = cant * costo;
+        const pagado = parseGuaranies(montoPagadoInp.value);
+        const saldo = Math.max(0, subtotal - pagado);
+        saldoCalcEl.textContent = formatGuaranies(saldo);
+      }
+
+      montoPagadoInp.addEventListener('input', (e) => {
+        const num = parseGuaranies(e.target.value);
+        e.target.value = formatGuaranies(num);
+        selectedProvMontoPagado = num;
+        updatePartialMath();
+      });
+
+      rowPvInputs.querySelectorAll('.prov-estado-btn').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          selectedProvEstadoPago = btn.dataset.estado;
+          rowPvInputs.querySelectorAll('.prov-estado-btn').forEach((b) => {
+            const st = b.dataset.estado;
+            if (st === selectedProvEstadoPago) {
+              if (st === 'Pendiente') b.className = 'prov-estado-btn flex-1 py-2 px-2.5 rounded-xl text-xs font-bold border transition cursor-pointer flex items-center justify-center gap-1.5 bg-amber-500 text-white border-amber-500 shadow-xs';
+              if (st === 'Pagado') b.className = 'prov-estado-btn flex-1 py-2 px-2.5 rounded-xl text-xs font-bold border transition cursor-pointer flex items-center justify-center gap-1.5 bg-emerald-600 text-white border-emerald-600 shadow-xs';
+              if (st === 'Pago Parcial') b.className = 'prov-estado-btn flex-1 py-2 px-2.5 rounded-xl text-xs font-bold border transition cursor-pointer flex items-center justify-center gap-1.5 bg-brand text-white border-brand shadow-xs';
+            } else {
+              b.className = 'prov-estado-btn flex-1 py-2 px-2.5 rounded-xl text-xs font-bold border transition cursor-pointer flex items-center justify-center gap-1.5 border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300';
+            }
+          });
+
+          if (selectedProvEstadoPago === 'Pago Parcial') {
+            partialBox.classList.remove('hidden');
+            updatePartialMath();
+          } else {
+            partialBox.classList.add('hidden');
+          }
+        });
+      });
+
+      // Fila de botones: Cancelar y Agregar Proveedor
+      const rowButtons = document.createElement('div');
+      rowButtons.className = 'flex items-center justify-end gap-2 pt-1';
 
       if (editingProvIndex >= 0) {
         const cancelEditProvBtn = createButton({
@@ -2018,10 +2162,14 @@ export function renderPedidosModule(container) {
           onClick: () => {
             editingProvIndex = -1;
             selectedProv = null;
+            selectedProvProd = '';
+            selectedProvProdId = null;
+            selectedProvEstadoPago = 'Pendiente';
+            selectedProvMontoPagado = 0;
             updateProvInputUI();
           },
         });
-        pvBtnHolder.appendChild(cancelEditProvBtn);
+        rowButtons.appendChild(cancelEditProvBtn);
       }
 
       const addPvBtn = createButton({
@@ -2047,16 +2195,57 @@ export function renderPedidosModule(container) {
             return;
           }
 
+          // Validación de productos en la orden
+          if (state.form.items.length === 0) {
+            toast.error('Agregue primero al menos un producto a la orden antes de vincular la compra a un proveedor.');
+            return;
+          }
+
+          let prodAsignado = selectedProvProd;
+          let prodIdAsignado = selectedProvProdId;
+
+          if (state.form.items.length === 1 && !prodAsignado) {
+            prodAsignado = state.form.items[0].nombreProducto;
+            prodIdAsignado = state.form.items[0].productoId || null;
+          }
+
+          if (state.form.items.length > 1 && !prodAsignado) {
+            toast.error('Es obligatorio seleccionar qué producto proveyó este proveedor.');
+            return;
+          }
+
           const cant = Number(rowPvInputs.querySelector('#prov-cant').value) || 1;
           const costo = parseGuaranies(costoInp.value);
+          const subtotal = cant * costo;
+
+          let montoPagado = 0;
+          let saldoPendiente = subtotal;
+
+          if (selectedProvEstadoPago === 'Pagado') {
+            montoPagado = subtotal;
+            saldoPendiente = 0;
+          } else if (selectedProvEstadoPago === 'Pendiente') {
+            montoPagado = 0;
+            saldoPendiente = subtotal;
+          } else if (selectedProvEstadoPago === 'Pago Parcial') {
+            montoPagado = parseGuaranies(montoPagadoInp.value);
+            if (montoPagado < 0) montoPagado = 0;
+            if (montoPagado > subtotal) montoPagado = subtotal;
+            saldoPendiente = Math.max(0, subtotal - montoPagado);
+          }
 
           const provData = {
             proveedorId: provId,
             esNoRegistrado: isProvNoRegistrado,
             nombreProveedor: nombre,
+            productoId: prodIdAsignado,
+            productoNombre: prodAsignado,
             cantidad: cant,
             costo: costo,
-            subtotal: cant * costo,
+            subtotal: subtotal,
+            estadoPago: selectedProvEstadoPago,
+            montoPagado: montoPagado,
+            saldoPendiente: saldoPendiente,
           };
 
           if (editingProvIndex >= 0) {
@@ -2069,15 +2258,22 @@ export function renderPedidosModule(container) {
           }
 
           selectedProv = null;
+          selectedProvProd = '';
+          selectedProvProdId = null;
+          selectedProvEstadoPago = 'Pendiente';
+          selectedProvMontoPagado = 0;
           updateProvInputUI();
           renderProvsTable();
           updateTotalOrderCard();
         },
       });
 
-      pvBtnHolder.appendChild(addPvBtn);
+      rowButtons.appendChild(addPvBtn);
       pGrid.appendChild(rowPvInputs);
+      pGrid.appendChild(partialBox);
+      pGrid.appendChild(rowButtons);
       provInputContainer.appendChild(pGrid);
+      updatePartialMath();
     }
 
     updateProvInputUI();
@@ -2117,9 +2313,11 @@ export function renderPedidosModule(container) {
           <thead class="bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-800 text-[10px] uppercase font-bold text-slate-500 tracking-wider">
             <tr>
               <th class="px-4 py-3">Proveedor</th>
+              <th class="px-4 py-3">Producto Asignado</th>
               <th class="px-4 py-3 text-center">Cantidad</th>
               <th class="px-4 py-3 text-right">Costo Unitario</th>
               <th class="px-4 py-3 text-right">Costo Total</th>
+              <th class="px-4 py-3 text-center">Estado Pago</th>
               <th class="px-4 py-3 text-right">Acciones</th>
             </tr>
           </thead>
@@ -2130,14 +2328,51 @@ export function renderPedidosModule(container) {
         state.form.proveedores.forEach((pr, idx) => {
           const row = document.createElement('tr');
           row.className = 'hover:bg-slate-50/50 dark:hover:bg-slate-800/30 transition-colors';
+
+          let estadoBadgeHtml = '';
+          const st = pr.estadoPago || 'Pendiente';
+          if (st === 'Pagado') {
+            estadoBadgeHtml = `
+              <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300">
+                <i class="fa-solid fa-check text-[9px]"></i>
+                <span>Pagado</span>
+              </span>
+            `;
+          } else if (st === 'Pago Parcial') {
+            estadoBadgeHtml = `
+              <div class="flex flex-col items-center">
+                <span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-purple-100 text-brand dark:bg-purple-950/60 dark:text-brand">
+                  <i class="fa-solid fa-circle-half-stroke text-[9px]"></i>
+                  <span>Parcial</span>
+                </span>
+                <span class="text-[9px] font-mono text-emerald-600 mt-0.5">Pag: ${formatGuaranies(pr.montoPagado || 0)}</span>
+                <span class="text-[9px] font-mono text-danger">Sal: ${formatGuaranies(pr.saldoPendiente || 0)}</span>
+              </div>
+            `;
+          } else {
+            estadoBadgeHtml = `
+              <div class="flex flex-col items-center">
+                <span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300">
+                  <i class="fa-solid fa-clock text-[9px]"></i>
+                  <span>Pendiente</span>
+                </span>
+                <span class="text-[9px] font-mono text-danger mt-0.5">Saldo: ${formatGuaranies(pr.subtotal || 0)}</span>
+              </div>
+            `;
+          }
+
           row.innerHTML = `
             <td class="px-4 py-3">
               <p class="font-bold text-slate-800 dark:text-slate-100">${escapeHtml(pr.nombreProveedor)}</p>
               ${pr.esNoRegistrado ? '<span class="text-[10px] text-amber-500 font-semibold">Manual / No registrado</span>' : '<span class="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold">Registrado</span>'}
             </td>
+            <td class="px-4 py-3">
+              <span class="font-medium text-slate-700 dark:text-slate-300">${escapeHtml(pr.productoNombre || '—')}</span>
+            </td>
             <td class="px-4 py-3 text-center font-bold text-slate-800 dark:text-slate-200">${pr.cantidad}</td>
             <td class="px-4 py-3 text-right font-mono text-slate-700 dark:text-slate-300">${formatGuaranies(pr.costo)}</td>
             <td class="px-4 py-3 text-right font-mono font-black text-brand">${formatGuaranies(pr.subtotal)}</td>
+            <td class="px-4 py-3 text-center">${estadoBadgeHtml}</td>
             <td class="px-4 py-3 text-right whitespace-nowrap">
               <button type="button" class="btn-edit-prov text-slate-500 hover:text-brand hover:bg-slate-100 dark:hover:bg-slate-800 p-1.5 rounded cursor-pointer mr-1" title="Editar proveedor">
                 <i class="fa-regular fa-pen-to-square"></i>
@@ -2158,6 +2393,10 @@ export function renderPedidosModule(container) {
               costo: pr.costo,
               cantidad: pr.cantidad,
             };
+            selectedProvProd = pr.productoNombre || '';
+            selectedProvProdId = pr.productoId || null;
+            selectedProvEstadoPago = pr.estadoPago || 'Pendiente';
+            selectedProvMontoPagado = pr.montoPagado || 0;
             updateProvInputUI();
             cardProveedores.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
           });
@@ -2167,6 +2406,10 @@ export function renderPedidosModule(container) {
             if (editingProvIndex === idx) {
               editingProvIndex = -1;
               selectedProv = null;
+              selectedProvProd = '';
+              selectedProvProdId = null;
+              selectedProvEstadoPago = 'Pendiente';
+              selectedProvMontoPagado = 0;
               updateProvInputUI();
             }
             renderProvsTable();
@@ -2178,7 +2421,6 @@ export function renderPedidosModule(container) {
 
         tableBox.appendChild(tbl);
       }
-
       provTableHolder.appendChild(tableBox);
     }
 
@@ -3295,22 +3537,37 @@ export function renderPedidosModule(container) {
             <thead class="bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-800 text-[10px] uppercase font-bold text-slate-500">
               <tr>
                 <th class="px-3.5 py-2">Proveedor</th>
+                <th class="px-3.5 py-2">Producto Asignado</th>
                 <th class="px-3.5 py-2 text-center">Cantidad</th>
                 <th class="px-3.5 py-2">Costo Unitario</th>
                 <th class="px-3.5 py-2 text-right">Costo Total</th>
+                <th class="px-3.5 py-2 text-center">Estado Pago</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-slate-100 dark:divide-slate-800/80">
               ${p.proveedores
                 .map(
-                  (pr) => `
-                <tr>
-                  <td class="px-3.5 py-2 font-bold">${escapeHtml(pr.nombreProveedor)}</td>
-                  <td class="px-3.5 py-2 text-center">${pr.cantidad}</td>
-                  <td class="px-3.5 py-2 font-mono">${formatGuaranies(pr.costo)}</td>
-                  <td class="px-3.5 py-2 text-right font-mono font-bold">${formatGuaranies(pr.subtotal)}</td>
-                </tr>
-              `
+                  (pr) => {
+                    const st = pr.estadoPago || 'Pendiente';
+                    let stBadge = '';
+                    if (st === 'Pagado') {
+                      stBadge = '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300">Pagado</span>';
+                    } else if (st === 'Pago Parcial') {
+                      stBadge = `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-100 text-brand dark:bg-purple-950/60 dark:text-brand">Parcial (${formatGuaranies(pr.montoPagado || 0)})</span>`;
+                    } else {
+                      stBadge = '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300">Pendiente</span>';
+                    }
+                    return `
+                    <tr>
+                      <td class="px-3.5 py-2 font-bold">${escapeHtml(pr.nombreProveedor)}</td>
+                      <td class="px-3.5 py-2 text-slate-600 dark:text-slate-300">${escapeHtml(pr.productoNombre || '—')}</td>
+                      <td class="px-3.5 py-2 text-center">${pr.cantidad}</td>
+                      <td class="px-3.5 py-2 font-mono">${formatGuaranies(pr.costo)}</td>
+                      <td class="px-3.5 py-2 text-right font-mono font-bold text-brand">${formatGuaranies(pr.subtotal)}</td>
+                      <td class="px-3.5 py-2 text-center">${stBadge}</td>
+                    </tr>
+                    `;
+                  }
                 )
                 .join('')}
             </tbody>

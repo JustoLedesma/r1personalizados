@@ -56,9 +56,14 @@ type PedidoProveedor struct {
 	ProveedorID     *int      `json:"proveedorId,omitempty"`
 	EsNoRegistrado  bool      `json:"esNoRegistrado"`
 	NombreProveedor string    `json:"nombreProveedor"`
+	ProductoID      *int      `json:"productoId,omitempty"`
+	ProductoNombre  string    `json:"productoNombre"`
 	Cantidad        float64   `json:"cantidad"`
 	Costo           float64   `json:"costo"`
 	Subtotal        float64   `json:"subtotal"`
+	EstadoPago      string    `json:"estadoPago"` // 'Pendiente' | 'Pagado' | 'Pago Parcial'
+	MontoPagado     float64   `json:"montoPagado"`
+	SaldoPendiente  float64   `json:"saldoPendiente"`
 	CreatedAt       time.Time `json:"createdAt"`
 	UpdatedAt       time.Time `json:"updatedAt"`
 }

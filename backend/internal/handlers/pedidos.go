@@ -109,6 +109,13 @@ func (h *PedidosHandler) ensureSchema() {
 	_, _ = h.DB.Exec("ALTER TABLE pedidos ADD COLUMN fecha_en_pausa DATETIME NULL DEFAULT NULL AFTER fecha_en_produccion")
 	_, _ = h.DB.Exec("ALTER TABLE pedidos ADD COLUMN fecha_listo DATETIME NULL DEFAULT NULL AFTER fecha_en_pausa")
 	_, _ = h.DB.Exec("ALTER TABLE pedidos ADD COLUMN historial_estados JSON NULL DEFAULT NULL AFTER fecha_listo")
+
+	// Columnas para pedido_proveedores
+	_, _ = h.DB.Exec("ALTER TABLE pedido_proveedores ADD COLUMN producto_id INT NULL DEFAULT NULL AFTER nombre_proveedor")
+	_, _ = h.DB.Exec("ALTER TABLE pedido_proveedores ADD COLUMN producto_nombre VARCHAR(255) NULL DEFAULT NULL AFTER producto_id")
+	_, _ = h.DB.Exec("ALTER TABLE pedido_proveedores ADD COLUMN estado_pago ENUM('Pendiente', 'Pagado', 'Pago Parcial') NOT NULL DEFAULT 'Pendiente' AFTER subtotal")
+	_, _ = h.DB.Exec("ALTER TABLE pedido_proveedores ADD COLUMN monto_pagado DECIMAL(15,2) NOT NULL DEFAULT 0 AFTER estado_pago")
+	_, _ = h.DB.Exec("ALTER TABLE pedido_proveedores ADD COLUMN saldo_pendiente DECIMAL(15,2) NOT NULL DEFAULT 0 AFTER monto_pagado")
 }
 
 func (h *PedidosHandler) getActorName(r *http.Request) string {
@@ -551,7 +558,12 @@ func (h *PedidosHandler) getPedidoItems(ctx context.Context, pedidoID int) []mod
 func (h *PedidosHandler) getPedidoProveedores(ctx context.Context, pedidoID int) []models.PedidoProveedor {
 	provs := make([]models.PedidoProveedor, 0)
 	rows, err := h.DB.QueryContext(ctx, `
-		SELECT id, pedido_id, proveedor_id, es_no_registrado, nombre_proveedor, cantidad, costo, subtotal, created_at, updated_at
+		SELECT
+			id, pedido_id, proveedor_id, es_no_registrado, nombre_proveedor,
+			producto_id, COALESCE(producto_nombre, ''),
+			cantidad, costo, subtotal,
+			COALESCE(estado_pago, 'Pendiente'), COALESCE(monto_pagado, 0), COALESCE(saldo_pendiente, 0),
+			created_at, updated_at
 		FROM pedido_proveedores
 		WHERE pedido_id = ?
 		ORDER BY id ASC
@@ -563,15 +575,21 @@ func (h *PedidosHandler) getPedidoProveedores(ctx context.Context, pedidoID int)
 
 	for rows.Next() {
 		var pr models.PedidoProveedor
-		var pvid sql.NullInt64
+		var pvid, prodid sql.NullInt64
 		if err := rows.Scan(
-			&pr.ID, &pr.PedidoID, &pvid, &pr.EsNoRegistrado,
-			&pr.NombreProveedor, &pr.Cantidad, &pr.Costo, &pr.Subtotal,
+			&pr.ID, &pr.PedidoID, &pvid, &pr.EsNoRegistrado, &pr.NombreProveedor,
+			&prodid, &pr.ProductoNombre,
+			&pr.Cantidad, &pr.Costo, &pr.Subtotal,
+			&pr.EstadoPago, &pr.MontoPagado, &pr.SaldoPendiente,
 			&pr.CreatedAt, &pr.UpdatedAt,
 		); err == nil {
 			if pvid.Valid {
 				v := int(pvid.Int64)
 				pr.ProveedorID = &v
+			}
+			if prodid.Valid {
+				v := int(prodid.Int64)
+				pr.ProductoID = &v
 			}
 			provs = append(provs, pr)
 		}
@@ -611,8 +629,13 @@ type CreatePedidoProvReq struct {
 	ProveedorID     *int    `json:"proveedorId"`
 	EsNoRegistrado  bool    `json:"esNoRegistrado"`
 	NombreProveedor string  `json:"nombreProveedor"`
+	ProductoID      *int    `json:"productoId"`
+	ProductoNombre  string  `json:"productoNombre"`
 	Cantidad        float64 `json:"cantidad"`
 	Costo           float64 `json:"costo"`
+	EstadoPago      string  `json:"estadoPago"`
+	MontoPagado     float64 `json:"montoPagado"`
+	SaldoPendiente  float64 `json:"saldoPendiente"`
 }
 
 // Create genera un nuevo pedido en la BD
@@ -764,12 +787,15 @@ func (h *PedidosHandler) Create(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Insertar proveedores si se cargaron
+	// Insertar proveedores si se cargaron y sincronizar con Pagos
 	if len(req.Proveedores) > 0 {
 		insertProvSQL := `
 			INSERT INTO pedido_proveedores (
-				pedido_id, proveedor_id, es_no_registrado, nombre_proveedor, cantidad, costo, subtotal
-			) VALUES (?, ?, ?, ?, ?, ?, ?)
+				pedido_id, proveedor_id, es_no_registrado, nombre_proveedor,
+				producto_id, producto_nombre,
+				cantidad, costo, subtotal,
+				estado_pago, monto_pagado, saldo_pendiente
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`
 		for _, pr := range req.Proveedores {
 			cant := pr.Cantidad
@@ -777,13 +803,80 @@ func (h *PedidosHandler) Create(w http.ResponseWriter, r *http.Request) {
 				cant = 1
 			}
 			subt := cant * pr.Costo
-			_, err := tx.ExecContext(r.Context(), insertProvSQL,
-				pedidoID, pr.ProveedorID, pr.EsNoRegistrado, pr.NombreProveedor, cant, pr.Costo, subt,
+
+			prodID := pr.ProductoID
+			prodNom := strings.TrimSpace(pr.ProductoNombre)
+			if len(req.Items) == 1 && prodNom == "" {
+				prodID = req.Items[0].ProductoID
+				prodNom = req.Items[0].NombreProducto
+			}
+
+			estPago := strings.TrimSpace(pr.EstadoPago)
+			if estPago != "Pagado" && estPago != "Pago Parcial" {
+				estPago = "Pendiente"
+			}
+			mPagado := pr.MontoPagado
+			sPendiente := pr.SaldoPendiente
+			if estPago == "Pagado" {
+				mPagado = subt
+				sPendiente = 0
+			} else if estPago == "Pendiente" {
+				mPagado = 0
+				sPendiente = subt
+			} else if estPago == "Pago Parcial" {
+				if mPagado < 0 {
+					mPagado = 0
+				}
+				if mPagado > subt {
+					mPagado = subt
+				}
+				sPendiente = subt - mPagado
+			}
+
+			resProv, err := tx.ExecContext(r.Context(), insertProvSQL,
+				pedidoID, pr.ProveedorID, pr.EsNoRegistrado, pr.NombreProveedor,
+				prodID, prodNom,
+				cant, pr.Costo, subt,
+				estPago, mPagado, sPendiente,
 			)
 			if err != nil {
 				auth.WriteJSONError(w, http.StatusInternalServerError, "error al asociar proveedor del pedido: "+err.Error())
 				return
 			}
+
+			ppID64, _ := resProv.LastInsertId()
+			ppID := int(ppID64)
+
+			var provRUC string
+			if pr.ProveedorID != nil && *pr.ProveedorID > 0 {
+				_ = tx.QueryRowContext(r.Context(), "SELECT COALESCE(ruc_documento, '') FROM proveedores WHERE id = ?", *pr.ProveedorID).Scan(&provRUC)
+			}
+
+			var lastPagoID int
+			_ = tx.QueryRowContext(r.Context(), "SELECT COALESCE(MAX(id), 0) FROM pagos").Scan(&lastPagoID)
+			numPago := fmt.Sprintf("PAG-%06d", lastPagoID+1)
+
+			insertPagoSQL := `
+				INSERT INTO pagos (
+					numero_pago, pedido_id, pedido_proveedor_id, tipo_beneficiario,
+					proveedor_id, proveedor_nombre, proveedor_ruc, es_proveedor_temporal,
+					cliente_id, cliente_nombre, cliente_documento, cliente_telefono,
+					producto_id, producto_nombre, es_producto_temporal,
+					cantidad, monto_total, monto_pagado, saldo_pendiente,
+					estado_pago, metodo_pago, fecha_pago, semana_iso, anio_iso,
+					notas, created_by
+				) VALUES (?, ?, ?, 'Proveedor', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, 'Efectivo', ?, ?, ?, ?, ?)
+			`
+			notes := fmt.Sprintf("Generado automáticamente desde Pedido %s", numeroPedido)
+			_, _ = tx.ExecContext(r.Context(), insertPagoSQL,
+				numPago, pedidoID, ppID,
+				pr.ProveedorID, pr.NombreProveedor, provRUC, pr.EsNoRegistrado,
+				req.ClienteID, req.ClienteNombre, req.ClienteDocumento, req.ClienteTelefono,
+				prodID, prodNom,
+				cant, subt, mPagado, sPendiente,
+				estPago, fechaPedidoStr, semanaISO, anioISO,
+				notes, h.getActorName(r),
+			)
 		}
 	}
 
@@ -1018,13 +1111,17 @@ func (h *PedidosHandler) Update(w http.ResponseWriter, r *http.Request, id int) 
 		}
 	}
 
-	// Reemplazar proveedores
+	// Reemplazar proveedores y sincronizar con Pagos
+	_, _ = tx.ExecContext(r.Context(), "DELETE FROM pagos WHERE pedido_id = ? AND pedido_proveedor_id IS NOT NULL", id)
 	_, _ = tx.ExecContext(r.Context(), "DELETE FROM pedido_proveedores WHERE pedido_id = ?", id)
 	if len(req.Proveedores) > 0 {
 		insertProvSQL := `
 			INSERT INTO pedido_proveedores (
-				pedido_id, proveedor_id, es_no_registrado, nombre_proveedor, cantidad, costo, subtotal
-			) VALUES (?, ?, ?, ?, ?, ?, ?)
+				pedido_id, proveedor_id, es_no_registrado, nombre_proveedor,
+				producto_id, producto_nombre,
+				cantidad, costo, subtotal,
+				estado_pago, monto_pagado, saldo_pendiente
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`
 		for _, pr := range req.Proveedores {
 			cant := pr.Cantidad
@@ -1032,13 +1129,80 @@ func (h *PedidosHandler) Update(w http.ResponseWriter, r *http.Request, id int) 
 				cant = 1
 			}
 			subt := cant * pr.Costo
-			_, err := tx.ExecContext(r.Context(), insertProvSQL,
-				id, pr.ProveedorID, pr.EsNoRegistrado, pr.NombreProveedor, cant, pr.Costo, subt,
+
+			prodID := pr.ProductoID
+			prodNom := strings.TrimSpace(pr.ProductoNombre)
+			if len(req.Items) == 1 && prodNom == "" {
+				prodID = req.Items[0].ProductoID
+				prodNom = req.Items[0].NombreProducto
+			}
+
+			estPago := strings.TrimSpace(pr.EstadoPago)
+			if estPago != "Pagado" && estPago != "Pago Parcial" {
+				estPago = "Pendiente"
+			}
+			mPagado := pr.MontoPagado
+			sPendiente := pr.SaldoPendiente
+			if estPago == "Pagado" {
+				mPagado = subt
+				sPendiente = 0
+			} else if estPago == "Pendiente" {
+				mPagado = 0
+				sPendiente = subt
+			} else if estPago == "Pago Parcial" {
+				if mPagado < 0 {
+					mPagado = 0
+				}
+				if mPagado > subt {
+					mPagado = subt
+				}
+				sPendiente = subt - mPagado
+			}
+
+			resProv, err := tx.ExecContext(r.Context(), insertProvSQL,
+				id, pr.ProveedorID, pr.EsNoRegistrado, pr.NombreProveedor,
+				prodID, prodNom,
+				cant, pr.Costo, subt,
+				estPago, mPagado, sPendiente,
 			)
 			if err != nil {
 				auth.WriteJSONError(w, http.StatusInternalServerError, "error al actualizar proveedores: "+err.Error())
 				return
 			}
+
+			ppID64, _ := resProv.LastInsertId()
+			ppID := int(ppID64)
+
+			var provRUC string
+			if pr.ProveedorID != nil && *pr.ProveedorID > 0 {
+				_ = tx.QueryRowContext(r.Context(), "SELECT COALESCE(ruc_documento, '') FROM proveedores WHERE id = ?", *pr.ProveedorID).Scan(&provRUC)
+			}
+
+			var lastPagoID int
+			_ = tx.QueryRowContext(r.Context(), "SELECT COALESCE(MAX(id), 0) FROM pagos").Scan(&lastPagoID)
+			numPago := fmt.Sprintf("PAG-%06d", lastPagoID+1)
+
+			insertPagoSQL := `
+				INSERT INTO pagos (
+					numero_pago, pedido_id, pedido_proveedor_id, tipo_beneficiario,
+					proveedor_id, proveedor_nombre, proveedor_ruc, es_proveedor_temporal,
+					cliente_id, cliente_nombre, cliente_documento, cliente_telefono,
+					producto_id, producto_nombre, es_producto_temporal,
+					cantidad, monto_total, monto_pagado, saldo_pendiente,
+					estado_pago, metodo_pago, fecha_pago, semana_iso, anio_iso,
+					notas, created_by
+				) VALUES (?, ?, ?, 'Proveedor', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, 'Efectivo', ?, ?, ?, ?, ?)
+			`
+			notes := fmt.Sprintf("Generado automáticamente desde Pedido %s", id)
+			_, _ = tx.ExecContext(r.Context(), insertPagoSQL,
+				numPago, id, ppID,
+				pr.ProveedorID, pr.NombreProveedor, provRUC, pr.EsNoRegistrado,
+				req.ClienteID, req.ClienteNombre, req.ClienteDocumento, req.ClienteTelefono,
+				prodID, prodNom,
+				cant, subt, mPagado, sPendiente,
+				estPago, fechaPedidoStr, semanaISO, anioISO,
+				notes, h.getActorName(r),
+			)
 		}
 	}
 
@@ -1068,6 +1232,13 @@ func (h *PedidosHandler) SoftDelete(w http.ResponseWriter, r *http.Request, id i
 		auth.WriteJSONError(w, http.StatusInternalServerError, "error al eliminar pedido: "+err.Error())
 		return
 	}
+
+	// Sincronizar borrado suave a los pagos originados por este pedido
+	_, _ = h.DB.ExecContext(r.Context(), `
+		UPDATE pagos
+		SET deleted_at = NOW(), deleted_by = ?
+		WHERE pedido_id = ? AND deleted_at IS NULL
+	`, actor, id)
 
 	affected, _ := res.RowsAffected()
 	if affected == 0 {
