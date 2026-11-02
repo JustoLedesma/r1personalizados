@@ -87,6 +87,34 @@ async function ensureWWebJSPatched() {
       await client.pupPage.evaluate(() => {
       if (!window.WWebJS) return;
 
+      window.WWebJS.mediaInfoToFile = ({ data, mimetype, filename }) => {
+        let clean = String(data || '').trim();
+        const commaIdx = clean.indexOf(',');
+        if (commaIdx !== -1 && clean.substring(0, commaIdx).includes('base64')) {
+          clean = clean.substring(commaIdx + 1);
+        }
+        try {
+          if (clean.includes('%')) clean = decodeURIComponent(clean);
+        } catch (_) {}
+        clean = clean.replace(/[^A-Za-z0-9+/=]/g, '');
+        const rem = clean.length % 4;
+        if (rem === 2) clean += '==';
+        else if (rem === 3) clean += '=';
+        else if (rem === 1) clean = clean.slice(0, -1);
+
+        const binaryData = window.atob(clean);
+        const buffer = new ArrayBuffer(binaryData.length);
+        const view = new Uint8Array(buffer);
+        for (let i = 0; i < binaryData.length; i++) {
+          view[i] = binaryData.charCodeAt(i);
+        }
+        const blob = new Blob([buffer], { type: mimetype || 'application/pdf' });
+        return new File([blob], filename || 'Presupuesto.pdf', {
+          type: mimetype || 'application/pdf',
+          lastModified: Date.now(),
+        });
+      };
+
       window.WWebJS.processMediaData = async (
         mediaInfo,
         {
@@ -651,18 +679,43 @@ function normalizePhoneDigits(raw) {
 }
 
 function parseDataUrl(dataUrl, fallbackMime) {
-  const str = String(dataUrl || '').trim();
+  let str = String(dataUrl || '').trim();
   if (!str) return null;
-  const match = str.match(/^data:([^;]+);base64,(.+)$/i);
-  if (match) {
-    return {
-      mime: match[1],
-      base64: match[2]
-    };
+
+  let mime = fallbackMime || 'application/octet-stream';
+  let base64 = str;
+
+  const base64Marker = ';base64,';
+  const markerIdx = str.indexOf(base64Marker);
+
+  if (markerIdx !== -1) {
+    const prefix = str.substring(0, markerIdx);
+    if (prefix.startsWith('data:')) {
+      const mimePart = prefix.substring(5).split(';')[0].trim();
+      if (mimePart) mime = mimePart;
+    }
+    base64 = str.substring(markerIdx + base64Marker.length);
+  } else if (str.startsWith('data:')) {
+    const commaIdx = str.indexOf(',');
+    if (commaIdx !== -1) {
+      base64 = str.substring(commaIdx + 1);
+    }
   }
+
+  try {
+    if (base64.includes('%')) base64 = decodeURIComponent(base64);
+  } catch (_) {}
+
+  // Quitar cualquier carácter que no pertenezca al alfabeto Base64 estricto y asegurar padding
+  base64 = base64.replace(/[^A-Za-z0-9+/=]/g, '');
+  const rem = base64.length % 4;
+  if (rem === 2) base64 += '==';
+  else if (rem === 3) base64 += '=';
+  else if (rem === 1) base64 = base64.slice(0, -1);
+
   return {
-    mime: fallbackMime || 'application/octet-stream',
-    base64: str
+    mime,
+    base64
   };
 }
 
@@ -893,6 +946,62 @@ const server = http.createServer(async (req, res) => {
       const body = await readJsonBody(req);
       const result = await sendWhatsAppMessage(body);
       return sendJSON(res, 200, result);
+    }
+
+    if (req.method === 'POST' && pathname === '/render-pdf') {
+      const body = await readJsonBody(req);
+      const html = body.html || '';
+      if (!html) {
+        return sendJSON(res, 400, { error: 'HTML es requerido' });
+      }
+
+      let preparedHtml = html;
+      if (!preparedHtml.includes('<base ') && preparedHtml.includes('<head>')) {
+        preparedHtml = preparedHtml.replace('<head>', '<head><base href="http://127.0.0.1:8081/">');
+      }
+
+      let browserToUse = null;
+      let closeBrowserAfter = false;
+
+      if (client && client.pupBrowser && client.pupBrowser.isConnected()) {
+        browserToUse = client.pupBrowser;
+      } else {
+        const puppeteer = require('puppeteer');
+        browserToUse = await puppeteer.launch({
+          headless: 'new',
+          args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
+        });
+        closeBrowserAfter = true;
+      }
+
+      try {
+        const page = await browserToUse.newPage();
+        await page.setViewport({ width: 1240, height: 1754, deviceScaleFactor: 2 });
+        await page.setContent(preparedHtml, { waitUntil: ['load', 'networkidle0'], timeout: 20000 }).catch(() => {});
+        await new Promise((r) => setTimeout(r, 400));
+        const pdfBuffer = await page.pdf({
+          format: 'A4',
+          printBackground: true,
+          preferCSSPageSize: true,
+          margin: { top: '0', right: '0', bottom: '0', left: '0' }
+        });
+        await page.close();
+        if (closeBrowserAfter) {
+          await browserToUse.close().catch(() => {});
+        }
+        const base64Data = Buffer.from(pdfBuffer).toString('base64');
+        return sendJSON(res, 200, {
+          success: true,
+          dataUri: `data:application/pdf;base64,${base64Data}`,
+          sizeBytes: pdfBuffer.length
+        });
+      } catch (err) {
+        if (closeBrowserAfter && browserToUse) {
+          try { await browserToUse.close(); } catch (_) {}
+        }
+        console.error('[RENDER-PDF ERROR]', err);
+        return sendJSON(res, 500, { error: err.message || 'Error renderizando PDF' });
+      }
     }
 
     return sendJSON(res, 404, { error: 'Ruta de worker WhatsApp no encontrada' });

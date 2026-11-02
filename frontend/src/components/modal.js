@@ -12,6 +12,7 @@ export function openModal({
   cancelText = 'Cancelar',
   confirmVariant = 'primary',
   hideFooter = false,
+  actions = null,
   hasUnsavedChanges = () => false,
   onConfirm = null,
   onClose = null,
@@ -108,28 +109,46 @@ export function openModal({
     footer.className =
       'flex items-center justify-end gap-3 px-5 py-3.5 border-t border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-900/60 shrink-0';
 
-    const btnCancel = createButton({
-      text: cancelText,
-      variant: 'cancel',
-      onClick: () => attemptClose(),
-    });
+    if (Array.isArray(actions) && actions.length > 0) {
+      actions.forEach((act) => {
+        const btn = createButton({
+          text: act.text || 'Aceptar',
+          variant: act.variant || 'primary',
+          icon: act.icon || '',
+          onClick: async (_, btnInstance) => {
+            if (typeof act.onClick === 'function') {
+              await act.onClick({ close, setLoading: btnInstance?.setLoading, body });
+            } else {
+              close();
+            }
+          },
+        });
+        footer.appendChild(btn);
+      });
+    } else {
+      const btnCancel = createButton({
+        text: cancelText,
+        variant: 'cancel',
+        onClick: () => attemptClose(),
+      });
 
-    const btnConfirm = createButton({
-      text: confirmText,
-      variant: confirmVariant,
-      onClick: async (_, btnInstance) => {
-        if (typeof onConfirm === 'function') {
-          const result = await onConfirm({ close, setLoading: btnInstance.setLoading, body });
-          if (result !== false) {
+      const btnConfirm = createButton({
+        text: confirmText,
+        variant: confirmVariant,
+        onClick: async (_, btnInstance) => {
+          if (typeof onConfirm === 'function') {
+            const result = await onConfirm({ close, setLoading: btnInstance.setLoading, body });
+            if (result !== false) {
+              close();
+            }
+          } else {
             close();
           }
-        } else {
-          close();
-        }
-      },
-    });
+        },
+      });
 
-    footer.append(btnCancel, btnConfirm);
+      footer.append(btnCancel, btnConfirm);
+    }
     dialog.appendChild(footer);
   }
 
@@ -194,8 +213,11 @@ export function openModal({
     firstFocusable.focus();
   }
 
-  return { close, dialog, body };
+  return { close, dialog, body, element: dialog, open: () => {} };
 }
+
+export const createModal = openModal;
+export const createConfirmModal = openConfirmModal;
 
 export function openConfirmModal({
   title = 'Confirmar acción',

@@ -172,6 +172,57 @@ func (h *ReciclajeHandler) List(w http.ResponseWriter, r *http.Request) {
 			}
 			rows.Close()
 		}
+
+		// 8. Presupuestos y Cotizaciones
+		rowsPres, err := h.DB.QueryContext(r.Context(), `
+			SELECT
+				id, numero_presupuesto, cliente_nombre, COALESCE(cliente_telefono, ''),
+				total_final, estado,
+				created_at, updated_at, COALESCE(deleted_by, 'Operador Ventas'), deleted_at
+			FROM presupuestos
+			WHERE deleted_at IS NOT NULL
+			ORDER BY deleted_at DESC
+		`)
+		if err == nil {
+			for rowsPres.Next() {
+				var (
+					id                      int
+					numPres, cliNom, cliTel string
+					est, delBy              string
+					totalFinal              float64
+					created, updated, delAt time.Time
+				)
+				if err := rowsPres.Scan(
+					&id, &numPres, &cliNom, &cliTel,
+					&totalFinal, &est,
+					&created, &updated, &delBy, &delAt,
+				); err == nil {
+					campos := []RecycleField{
+						{Label: "N° Presupuesto", Value: numPres},
+						{Label: "Cliente", Value: cliNom},
+						{Label: "Teléfono", Value: cliTel},
+						{Label: "Total", Value: fmt.Sprintf("%.0f Gs.", totalFinal)},
+						{Label: "Último Estado", Value: est},
+					}
+					item := RecycleItem{
+						ID:            id,
+						Modulo:        "Presupuestos",
+						Identificador: numPres,
+						Nombre:        fmt.Sprintf("Presupuesto %s - %s", numPres, cliNom),
+						Detalle:       fmt.Sprintf("Cliente: %s · Total: %.0f Gs.", cliNom, totalFinal),
+						CreatedAt:     created,
+						UpdatedAt:     updated,
+						DeletedBy:     delBy,
+						DeletedAt:     delAt,
+						Campos:        campos,
+					}
+					if q == "" || matchesRecycleSearch(item, q) {
+						allItems = append(allItems, item)
+					}
+				}
+			}
+			rowsPres.Close()
+		}
 	}
 
 	// 2. Proveedores en reciclaje
@@ -257,6 +308,57 @@ func (h *ReciclajeHandler) List(w http.ResponseWriter, r *http.Request) {
 			}
 			rows.Close()
 		}
+
+		// 8. Presupuestos y Cotizaciones
+		rowsPres, err := h.DB.QueryContext(r.Context(), `
+			SELECT
+				id, numero_presupuesto, cliente_nombre, COALESCE(cliente_telefono, ''),
+				total_final, estado,
+				created_at, updated_at, COALESCE(deleted_by, 'Operador Ventas'), deleted_at
+			FROM presupuestos
+			WHERE deleted_at IS NOT NULL
+			ORDER BY deleted_at DESC
+		`)
+		if err == nil {
+			for rowsPres.Next() {
+				var (
+					id                      int
+					numPres, cliNom, cliTel string
+					est, delBy              string
+					totalFinal              float64
+					created, updated, delAt time.Time
+				)
+				if err := rowsPres.Scan(
+					&id, &numPres, &cliNom, &cliTel,
+					&totalFinal, &est,
+					&created, &updated, &delBy, &delAt,
+				); err == nil {
+					campos := []RecycleField{
+						{Label: "N° Presupuesto", Value: numPres},
+						{Label: "Cliente", Value: cliNom},
+						{Label: "Teléfono", Value: cliTel},
+						{Label: "Total", Value: fmt.Sprintf("%.0f Gs.", totalFinal)},
+						{Label: "Último Estado", Value: est},
+					}
+					item := RecycleItem{
+						ID:            id,
+						Modulo:        "Presupuestos",
+						Identificador: numPres,
+						Nombre:        fmt.Sprintf("Presupuesto %s - %s", numPres, cliNom),
+						Detalle:       fmt.Sprintf("Cliente: %s · Total: %.0f Gs.", cliNom, totalFinal),
+						CreatedAt:     created,
+						UpdatedAt:     updated,
+						DeletedBy:     delBy,
+						DeletedAt:     delAt,
+						Campos:        campos,
+					}
+					if q == "" || matchesRecycleSearch(item, q) {
+						allItems = append(allItems, item)
+					}
+				}
+			}
+			rowsPres.Close()
+		}
 	}
 
 	// 3. Perfiles de Mensajes en reciclaje
@@ -312,6 +414,57 @@ func (h *ReciclajeHandler) List(w http.ResponseWriter, r *http.Request) {
 			}
 			rows.Close()
 		}
+
+		// 8. Presupuestos y Cotizaciones
+		rowsPres, err := h.DB.QueryContext(r.Context(), `
+			SELECT
+				id, numero_presupuesto, cliente_nombre, COALESCE(cliente_telefono, ''),
+				total_final, estado,
+				created_at, updated_at, COALESCE(deleted_by, 'Operador Ventas'), deleted_at
+			FROM presupuestos
+			WHERE deleted_at IS NOT NULL
+			ORDER BY deleted_at DESC
+		`)
+		if err == nil {
+			for rowsPres.Next() {
+				var (
+					id                      int
+					numPres, cliNom, cliTel string
+					est, delBy              string
+					totalFinal              float64
+					created, updated, delAt time.Time
+				)
+				if err := rowsPres.Scan(
+					&id, &numPres, &cliNom, &cliTel,
+					&totalFinal, &est,
+					&created, &updated, &delBy, &delAt,
+				); err == nil {
+					campos := []RecycleField{
+						{Label: "N° Presupuesto", Value: numPres},
+						{Label: "Cliente", Value: cliNom},
+						{Label: "Teléfono", Value: cliTel},
+						{Label: "Total", Value: fmt.Sprintf("%.0f Gs.", totalFinal)},
+						{Label: "Último Estado", Value: est},
+					}
+					item := RecycleItem{
+						ID:            id,
+						Modulo:        "Presupuestos",
+						Identificador: numPres,
+						Nombre:        fmt.Sprintf("Presupuesto %s - %s", numPres, cliNom),
+						Detalle:       fmt.Sprintf("Cliente: %s · Total: %.0f Gs.", cliNom, totalFinal),
+						CreatedAt:     created,
+						UpdatedAt:     updated,
+						DeletedBy:     delBy,
+						DeletedAt:     delAt,
+						Campos:        campos,
+					}
+					if q == "" || matchesRecycleSearch(item, q) {
+						allItems = append(allItems, item)
+					}
+				}
+			}
+			rowsPres.Close()
+		}
 	}
 
 	// 4. Difusión y Mensajes en reciclaje
@@ -365,6 +518,57 @@ func (h *ReciclajeHandler) List(w http.ResponseWriter, r *http.Request) {
 			}
 			rows.Close()
 		}
+
+		// 8. Presupuestos y Cotizaciones
+		rowsPres, err := h.DB.QueryContext(r.Context(), `
+			SELECT
+				id, numero_presupuesto, cliente_nombre, COALESCE(cliente_telefono, ''),
+				total_final, estado,
+				created_at, updated_at, COALESCE(deleted_by, 'Operador Ventas'), deleted_at
+			FROM presupuestos
+			WHERE deleted_at IS NOT NULL
+			ORDER BY deleted_at DESC
+		`)
+		if err == nil {
+			for rowsPres.Next() {
+				var (
+					id                      int
+					numPres, cliNom, cliTel string
+					est, delBy              string
+					totalFinal              float64
+					created, updated, delAt time.Time
+				)
+				if err := rowsPres.Scan(
+					&id, &numPres, &cliNom, &cliTel,
+					&totalFinal, &est,
+					&created, &updated, &delBy, &delAt,
+				); err == nil {
+					campos := []RecycleField{
+						{Label: "N° Presupuesto", Value: numPres},
+						{Label: "Cliente", Value: cliNom},
+						{Label: "Teléfono", Value: cliTel},
+						{Label: "Total", Value: fmt.Sprintf("%.0f Gs.", totalFinal)},
+						{Label: "Último Estado", Value: est},
+					}
+					item := RecycleItem{
+						ID:            id,
+						Modulo:        "Presupuestos",
+						Identificador: numPres,
+						Nombre:        fmt.Sprintf("Presupuesto %s - %s", numPres, cliNom),
+						Detalle:       fmt.Sprintf("Cliente: %s · Total: %.0f Gs.", cliNom, totalFinal),
+						CreatedAt:     created,
+						UpdatedAt:     updated,
+						DeletedBy:     delBy,
+						DeletedAt:     delAt,
+						Campos:        campos,
+					}
+					if q == "" || matchesRecycleSearch(item, q) {
+						allItems = append(allItems, item)
+					}
+				}
+			}
+			rowsPres.Close()
+		}
 	}
 
 	// 5. Categorías de Productos en reciclaje
@@ -403,6 +607,57 @@ func (h *ReciclajeHandler) List(w http.ResponseWriter, r *http.Request) {
 			}
 			rows.Close()
 		}
+
+		// 8. Presupuestos y Cotizaciones
+		rowsPres, err := h.DB.QueryContext(r.Context(), `
+			SELECT
+				id, numero_presupuesto, cliente_nombre, COALESCE(cliente_telefono, ''),
+				total_final, estado,
+				created_at, updated_at, COALESCE(deleted_by, 'Operador Ventas'), deleted_at
+			FROM presupuestos
+			WHERE deleted_at IS NOT NULL
+			ORDER BY deleted_at DESC
+		`)
+		if err == nil {
+			for rowsPres.Next() {
+				var (
+					id                      int
+					numPres, cliNom, cliTel string
+					est, delBy              string
+					totalFinal              float64
+					created, updated, delAt time.Time
+				)
+				if err := rowsPres.Scan(
+					&id, &numPres, &cliNom, &cliTel,
+					&totalFinal, &est,
+					&created, &updated, &delBy, &delAt,
+				); err == nil {
+					campos := []RecycleField{
+						{Label: "N° Presupuesto", Value: numPres},
+						{Label: "Cliente", Value: cliNom},
+						{Label: "Teléfono", Value: cliTel},
+						{Label: "Total", Value: fmt.Sprintf("%.0f Gs.", totalFinal)},
+						{Label: "Último Estado", Value: est},
+					}
+					item := RecycleItem{
+						ID:            id,
+						Modulo:        "Presupuestos",
+						Identificador: numPres,
+						Nombre:        fmt.Sprintf("Presupuesto %s - %s", numPres, cliNom),
+						Detalle:       fmt.Sprintf("Cliente: %s · Total: %.0f Gs.", cliNom, totalFinal),
+						CreatedAt:     created,
+						UpdatedAt:     updated,
+						DeletedBy:     delBy,
+						DeletedAt:     delAt,
+						Campos:        campos,
+					}
+					if q == "" || matchesRecycleSearch(item, q) {
+						allItems = append(allItems, item)
+					}
+				}
+			}
+			rowsPres.Close()
+		}
 	}
 
 	// 6. Marcas de Productos en reciclaje
@@ -440,6 +695,57 @@ func (h *ReciclajeHandler) List(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			rows.Close()
+		}
+
+		// 8. Presupuestos y Cotizaciones
+		rowsPres, err := h.DB.QueryContext(r.Context(), `
+			SELECT
+				id, numero_presupuesto, cliente_nombre, COALESCE(cliente_telefono, ''),
+				total_final, estado,
+				created_at, updated_at, COALESCE(deleted_by, 'Operador Ventas'), deleted_at
+			FROM presupuestos
+			WHERE deleted_at IS NOT NULL
+			ORDER BY deleted_at DESC
+		`)
+		if err == nil {
+			for rowsPres.Next() {
+				var (
+					id                      int
+					numPres, cliNom, cliTel string
+					est, delBy              string
+					totalFinal              float64
+					created, updated, delAt time.Time
+				)
+				if err := rowsPres.Scan(
+					&id, &numPres, &cliNom, &cliTel,
+					&totalFinal, &est,
+					&created, &updated, &delBy, &delAt,
+				); err == nil {
+					campos := []RecycleField{
+						{Label: "N° Presupuesto", Value: numPres},
+						{Label: "Cliente", Value: cliNom},
+						{Label: "Teléfono", Value: cliTel},
+						{Label: "Total", Value: fmt.Sprintf("%.0f Gs.", totalFinal)},
+						{Label: "Último Estado", Value: est},
+					}
+					item := RecycleItem{
+						ID:            id,
+						Modulo:        "Presupuestos",
+						Identificador: numPres,
+						Nombre:        fmt.Sprintf("Presupuesto %s - %s", numPres, cliNom),
+						Detalle:       fmt.Sprintf("Cliente: %s · Total: %.0f Gs.", cliNom, totalFinal),
+						CreatedAt:     created,
+						UpdatedAt:     updated,
+						DeletedBy:     delBy,
+						DeletedAt:     delAt,
+						Campos:        campos,
+					}
+					if q == "" || matchesRecycleSearch(item, q) {
+						allItems = append(allItems, item)
+					}
+				}
+			}
+			rowsPres.Close()
 		}
 	}
 
@@ -485,6 +791,57 @@ func (h *ReciclajeHandler) List(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			rows.Close()
+		}
+
+		// 8. Presupuestos y Cotizaciones
+		rowsPres, err := h.DB.QueryContext(r.Context(), `
+			SELECT
+				id, numero_presupuesto, cliente_nombre, COALESCE(cliente_telefono, ''),
+				total_final, estado,
+				created_at, updated_at, COALESCE(deleted_by, 'Operador Ventas'), deleted_at
+			FROM presupuestos
+			WHERE deleted_at IS NOT NULL
+			ORDER BY deleted_at DESC
+		`)
+		if err == nil {
+			for rowsPres.Next() {
+				var (
+					id                      int
+					numPres, cliNom, cliTel string
+					est, delBy              string
+					totalFinal              float64
+					created, updated, delAt time.Time
+				)
+				if err := rowsPres.Scan(
+					&id, &numPres, &cliNom, &cliTel,
+					&totalFinal, &est,
+					&created, &updated, &delBy, &delAt,
+				); err == nil {
+					campos := []RecycleField{
+						{Label: "N° Presupuesto", Value: numPres},
+						{Label: "Cliente", Value: cliNom},
+						{Label: "Teléfono", Value: cliTel},
+						{Label: "Total", Value: fmt.Sprintf("%.0f Gs.", totalFinal)},
+						{Label: "Último Estado", Value: est},
+					}
+					item := RecycleItem{
+						ID:            id,
+						Modulo:        "Presupuestos",
+						Identificador: numPres,
+						Nombre:        fmt.Sprintf("Presupuesto %s - %s", numPres, cliNom),
+						Detalle:       fmt.Sprintf("Cliente: %s · Total: %.0f Gs.", cliNom, totalFinal),
+						CreatedAt:     created,
+						UpdatedAt:     updated,
+						DeletedBy:     delBy,
+						DeletedAt:     delAt,
+						Campos:        campos,
+					}
+					if q == "" || matchesRecycleSearch(item, q) {
+						allItems = append(allItems, item)
+					}
+				}
+			}
+			rowsPres.Close()
 		}
 	}
 
@@ -534,6 +891,57 @@ func (h *ReciclajeHandler) List(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			rows.Close()
+		}
+
+		// 8. Presupuestos y Cotizaciones
+		rowsPres, err := h.DB.QueryContext(r.Context(), `
+			SELECT
+				id, numero_presupuesto, cliente_nombre, COALESCE(cliente_telefono, ''),
+				total_final, estado,
+				created_at, updated_at, COALESCE(deleted_by, 'Operador Ventas'), deleted_at
+			FROM presupuestos
+			WHERE deleted_at IS NOT NULL
+			ORDER BY deleted_at DESC
+		`)
+		if err == nil {
+			for rowsPres.Next() {
+				var (
+					id                      int
+					numPres, cliNom, cliTel string
+					est, delBy              string
+					totalFinal              float64
+					created, updated, delAt time.Time
+				)
+				if err := rowsPres.Scan(
+					&id, &numPres, &cliNom, &cliTel,
+					&totalFinal, &est,
+					&created, &updated, &delBy, &delAt,
+				); err == nil {
+					campos := []RecycleField{
+						{Label: "N° Presupuesto", Value: numPres},
+						{Label: "Cliente", Value: cliNom},
+						{Label: "Teléfono", Value: cliTel},
+						{Label: "Total", Value: fmt.Sprintf("%.0f Gs.", totalFinal)},
+						{Label: "Último Estado", Value: est},
+					}
+					item := RecycleItem{
+						ID:            id,
+						Modulo:        "Presupuestos",
+						Identificador: numPres,
+						Nombre:        fmt.Sprintf("Presupuesto %s - %s", numPres, cliNom),
+						Detalle:       fmt.Sprintf("Cliente: %s · Total: %.0f Gs.", cliNom, totalFinal),
+						CreatedAt:     created,
+						UpdatedAt:     updated,
+						DeletedBy:     delBy,
+						DeletedAt:     delAt,
+						Campos:        campos,
+					}
+					if q == "" || matchesRecycleSearch(item, q) {
+						allItems = append(allItems, item)
+					}
+				}
+			}
+			rowsPres.Close()
 		}
 	}
 
@@ -587,6 +995,57 @@ func (h *ReciclajeHandler) List(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			rows.Close()
+		}
+
+		// 8. Presupuestos y Cotizaciones
+		rowsPres, err := h.DB.QueryContext(r.Context(), `
+			SELECT
+				id, numero_presupuesto, cliente_nombre, COALESCE(cliente_telefono, ''),
+				total_final, estado,
+				created_at, updated_at, COALESCE(deleted_by, 'Operador Ventas'), deleted_at
+			FROM presupuestos
+			WHERE deleted_at IS NOT NULL
+			ORDER BY deleted_at DESC
+		`)
+		if err == nil {
+			for rowsPres.Next() {
+				var (
+					id                      int
+					numPres, cliNom, cliTel string
+					est, delBy              string
+					totalFinal              float64
+					created, updated, delAt time.Time
+				)
+				if err := rowsPres.Scan(
+					&id, &numPres, &cliNom, &cliTel,
+					&totalFinal, &est,
+					&created, &updated, &delBy, &delAt,
+				); err == nil {
+					campos := []RecycleField{
+						{Label: "N° Presupuesto", Value: numPres},
+						{Label: "Cliente", Value: cliNom},
+						{Label: "Teléfono", Value: cliTel},
+						{Label: "Total", Value: fmt.Sprintf("%.0f Gs.", totalFinal)},
+						{Label: "Último Estado", Value: est},
+					}
+					item := RecycleItem{
+						ID:            id,
+						Modulo:        "Presupuestos",
+						Identificador: numPres,
+						Nombre:        fmt.Sprintf("Presupuesto %s - %s", numPres, cliNom),
+						Detalle:       fmt.Sprintf("Cliente: %s · Total: %.0f Gs.", cliNom, totalFinal),
+						CreatedAt:     created,
+						UpdatedAt:     updated,
+						DeletedBy:     delBy,
+						DeletedAt:     delAt,
+						Campos:        campos,
+					}
+					if q == "" || matchesRecycleSearch(item, q) {
+						allItems = append(allItems, item)
+					}
+				}
+			}
+			rowsPres.Close()
 		}
 	}
 
@@ -695,6 +1154,12 @@ func (h *ReciclajeHandler) Restore(w http.ResponseWriter, r *http.Request) {
 		_, err := h.DB.ExecContext(r.Context(), "UPDATE pedidos SET deleted_at = NULL, deleted_by = NULL WHERE id = ?", req.ID)
 		if err != nil {
 			auth.WriteJSONError(w, http.StatusInternalServerError, "no se pudo restaurar el pedido")
+			return
+		}
+	case "presupuestos", "presupuesto":
+		_, err := h.DB.ExecContext(r.Context(), "UPDATE presupuestos SET deleted_at = NULL, deleted_by = NULL WHERE id = ?", req.ID)
+		if err != nil {
+			auth.WriteJSONError(w, http.StatusInternalServerError, "no se pudo restaurar el presupuesto")
 			return
 		}
 	default:

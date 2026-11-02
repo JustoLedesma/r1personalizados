@@ -3,7 +3,7 @@ import { openModal, openConfirmModal } from '../components/modal.js';
 import { toast } from '../components/toast.js';
 import { apiFetch } from '../services/api.js';
 import { createPhoneInput } from '../components/phone-input.js';
-import { BudgetDocumentService, loadPdfmeLibraries, resolveBasePdf } from '../services/budget-document.service.js?v=20261031_3';
+import { BudgetDocumentService, loadPdfmeLibraries, resolveBasePdf } from '../services/budget-document.service.js?v=20261031_8';
 
 function escapeHtml(str) {
   if (str === null || str === undefined) return '';
@@ -109,6 +109,13 @@ export function renderConfiguracionModule(container) {
 
   function renderActiveTab() {
     contentHolder.innerHTML = '';
+    if (state.activeTab === 'presupuesto') {
+      wrapper.className = 'w-full h-full min-h-0 flex flex-col space-y-3 pb-0';
+      contentHolder.className = 'w-full flex-1 min-h-0 flex flex-col';
+    } else {
+      wrapper.className = 'w-full space-y-6 pb-12';
+      contentHolder.className = 'w-full';
+    }
     if (state.activeTab === 'whatsapp') {
       renderWhatsAppTab(contentHolder);
     } else if (state.activeTab === 'pedidos') {
@@ -1228,449 +1235,1626 @@ export function renderConfiguracionModule(container) {
   }
 
   // ============================================================================
-  // PESTAÑA 4: PRESUPUESTO — Diseñador de Plantillas Interactivo con @pdfme
+  // COMPONENTE: Editor de Texto Enriquecido Reutilizable (WYSIWYG Ligero)
   // ============================================================================
-  let activeBudgetDesigner = null;
+  function createRichEditor({ container, initialHtml, placeholder = '', onUpdate, showLists = true, minHeight = '70px' }) {
+    container.innerHTML = '';
+    const wrap = document.createElement('div');
+    wrap.className = 'w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 overflow-hidden focus-within:ring-2 focus-within:ring-brand';
 
-  function renderPresupuestoTab(parent) {
-    if (activeBudgetDesigner) {
-      try {
-        activeBudgetDesigner.destroy();
-      } catch (_) {}
-      activeBudgetDesigner = null;
+    // Barra de herramientas (Toolbar)
+    const toolbar = document.createElement('div');
+    toolbar.className = 'flex flex-wrap items-center gap-1 p-1.5 bg-slate-50 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-xs select-none';
+
+    function makeBtn(iconClass, cmd, value = null, title = '') {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'p-1.5 w-7 h-7 rounded-md hover:bg-slate-200 dark:hover:bg-slate-700 flex items-center justify-center transition text-slate-600 dark:text-slate-300';
+      btn.title = title || cmd;
+      btn.innerHTML = `<i class="${iconClass}"></i>`;
+      btn.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        document.execCommand(cmd, false, value);
+        editor.focus();
+        triggerUpdate();
+      });
+      return btn;
     }
 
-    const card = document.createElement('section');
-    card.className =
-      'w-full bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl p-5 sm:p-7 shadow-xs space-y-6';
+    // Negrita, Cursiva, Subrayado
+    toolbar.appendChild(makeBtn('fa-solid fa-bold', 'bold', null, 'Negrita'));
+    toolbar.appendChild(makeBtn('fa-solid fa-italic', 'italic', null, 'Cursiva'));
+    toolbar.appendChild(makeBtn('fa-solid fa-underline', 'underline', null, 'Subrayado'));
 
-    // 1. Cabecera informativa
-    const header = document.createElement('div');
-    header.className =
-      'flex flex-wrap items-center justify-between gap-4 pb-4 border-b border-slate-100 dark:border-slate-800';
-    header.innerHTML = `
-      <div class="flex items-start gap-3">
+    // Separador
+    const sep1 = document.createElement('div');
+    sep1.className = 'w-px h-4 bg-slate-300 dark:bg-slate-600 mx-1';
+    toolbar.appendChild(sep1);
+
+    // Tamaño de fuente
+    const sizeSelect = document.createElement('select');
+    sizeSelect.className = 'px-1.5 py-1 text-[11px] rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 focus:outline-hidden';
+    sizeSelect.innerHTML = `
+      <option value="">Tamaño</option>
+      <option value="1">7 pt (Mini)</option>
+      <option value="2">8 pt (Pequeño)</option>
+      <option value="3">9 pt (Normal)</option>
+      <option value="4">10 pt (Mediano)</option>
+      <option value="5">12 pt (Grande)</option>
+      <option value="6">14 pt (Título)</option>
+    `;
+    sizeSelect.addEventListener('change', () => {
+      if (sizeSelect.value) {
+        document.execCommand('fontSize', false, sizeSelect.value);
+        sizeSelect.value = '';
+        editor.focus();
+        triggerUpdate();
+      }
+    });
+    toolbar.appendChild(sizeSelect);
+
+    // Tipografía
+    const fontSelect = document.createElement('select');
+    fontSelect.className = 'px-1.5 py-1 text-[11px] rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 focus:outline-hidden';
+    fontSelect.innerHTML = `
+      <option value="">Tipografía</option>
+      <option value="Inter, sans-serif">Sans-Serif (Inter)</option>
+      <option value="Arial, sans-serif">Arial</option>
+      <option value="Roboto, sans-serif">Roboto</option>
+      <option value="Georgia, serif">Georgia</option>
+      <option value="'Times New Roman', serif">Times New Roman</option>
+      <option value="monospace">Courier (Mono)</option>
+    `;
+    fontSelect.addEventListener('change', () => {
+      if (fontSelect.value) {
+        document.execCommand('fontName', false, fontSelect.value);
+        fontSelect.value = '';
+        editor.focus();
+        triggerUpdate();
+      }
+    });
+    toolbar.appendChild(fontSelect);
+
+    // Selector de color de texto
+    const colorWrap = document.createElement('label');
+    colorWrap.className = 'relative inline-flex items-center justify-center p-1 w-7 h-7 rounded-md hover:bg-slate-200 dark:hover:bg-slate-700 cursor-pointer text-slate-600 dark:text-slate-300';
+    colorWrap.title = 'Color de texto';
+    colorWrap.innerHTML = `
+      <i class="fa-solid fa-palette text-xs"></i>
+      <input type="color" class="absolute inset-0 opacity-0 cursor-pointer w-full h-full" value="#0f172a" />
+    `;
+    const colorInput = colorWrap.querySelector('input');
+    colorInput.addEventListener('input', () => {
+      document.execCommand('foreColor', false, colorInput.value);
+      editor.focus();
+      triggerUpdate();
+    });
+    toolbar.appendChild(colorWrap);
+
+    // Separador
+    const sep2 = document.createElement('div');
+    sep2.className = 'w-px h-4 bg-slate-300 dark:bg-slate-600 mx-1';
+    toolbar.appendChild(sep2);
+
+    // Alineación
+    toolbar.appendChild(makeBtn('fa-solid fa-align-left', 'justifyLeft', null, 'Alinear a la izquierda'));
+    toolbar.appendChild(makeBtn('fa-solid fa-align-center', 'justifyCenter', null, 'Centrar'));
+    toolbar.appendChild(makeBtn('fa-solid fa-align-right', 'justifyRight', null, 'Alinear a la derecha'));
+    toolbar.appendChild(makeBtn('fa-solid fa-align-justify', 'justifyFull', null, 'Justificar'));
+
+    // Listas
+    if (showLists) {
+      const sep3 = document.createElement('div');
+      sep3.className = 'w-px h-4 bg-slate-300 dark:bg-slate-600 mx-1';
+      toolbar.appendChild(sep3);
+      toolbar.appendChild(makeBtn('fa-solid fa-list-ol', 'insertOrderedList', null, 'Lista numerada'));
+      toolbar.appendChild(makeBtn('fa-solid fa-list-ul', 'insertUnorderedList', null, 'Lista con viñetas'));
+    }
+
+    // Área editable
+    const editor = document.createElement('div');
+    editor.contentEditable = 'true';
+    editor.className = 'w-full p-2.5 text-xs text-slate-800 dark:text-slate-100 bg-white dark:bg-slate-900 focus:outline-hidden overflow-y-auto leading-relaxed';
+    editor.style.minHeight = minHeight;
+    editor.style.maxHeight = '240px';
+    editor.innerHTML = initialHtml || '';
+
+    function triggerUpdate() {
+      if (typeof onUpdate === 'function') {
+        onUpdate(editor.innerHTML);
+      }
+    }
+
+    editor.addEventListener('input', triggerUpdate);
+    editor.addEventListener('blur', triggerUpdate);
+
+    wrap.append(toolbar, editor);
+    container.appendChild(wrap);
+
+    return {
+      editor,
+      setHtml: (h) => {
+        editor.innerHTML = h || '';
+        triggerUpdate();
+      },
+      getHtml: () => editor.innerHTML,
+    };
+  }
+
+  // ============================================================================
+  // PESTAÑA 4: PRESUPUESTO — Configuración Visual y Vista Previa en Tiempo Real (Split-Screen)
+  // ============================================================================
+  function renderPresupuestoTab(parent) {
+    const wrap = document.createElement('div');
+    wrap.className = 'w-full flex-1 min-h-0 flex flex-col space-y-3';
+
+    // Estado local de la configuración y previsualización
+    let cfg = BudgetDocumentService.getDefaultBudgetConfig();
+    let sampleBudget = {
+      id: 3,
+      numero_presupuesto: 'PRES-2026-0003',
+      fecha_emision: '24/10/2026',
+      validez_dias: 15,
+      validez_fecha: '08/11/2026 (15 días)',
+      estado: 'Aprobado',
+      cliente: {
+        nombre: 'Zunilda Ledesma',
+        ruc: '727424',
+        telefono: '+595986901117',
+        email: 'zunilda@example.com',
+        direccion: 'Presidente Franco, Paraguay',
+      },
+      items: [
+        { id: 1, descripcion: 'Taza para Bebe', precio_unitario: 50000, precio_unitario_formateado: '50.000 Gs.', cantidad: 10, total: 500000, total_formateado: '500.000 Gs.', imagen_url: '/logo/R1.png' },
+        { id: 2, descripcion: 'Taza Especial Sublimada R1', precio_unitario: 150000, precio_unitario_formateado: '150.000 Gs.', cantidad: 10, total: 1500000, total_formateado: '1.500.000 Gs.', imagen_url: '/logo/R1.png' },
+        { id: 3, descripcion: 'Taza Magica Sublimada 350ml', precio_unitario: 45000, precio_unitario_formateado: '45.000 Gs.', cantidad: 10, total: 450000, total_formateado: '450.000 Gs.', imagen_url: '/logo/R1.png' },
+        { id: 4, descripcion: 'Kepis', precio_unitario: 55000, precio_unitario_formateado: '55.000 Gs.', cantidad: 15, total: 825000, total_formateado: '825.000 Gs.', imagen_url: '/logo/R1.png' },
+      ],
+      totales: {
+        subtotal: 3275000,
+        subtotal_formateado: '3.275.000 Gs.',
+        porcentaje_descuento: 2.3,
+        monto_descuento: 75000,
+        monto_descuento_formateado: '- 75.000 Gs.',
+        total_final: 3200000,
+        total_final_formateado: '3.200.000 Gs.',
+      },
+      imagenes_productos: [
+        { nombre: 'Taza para Bebe', url: '/logo/R1.png' },
+        { nombre: 'Taza para Bebe', url: '/logo/R1.png' },
+        { nombre: 'Taza Especial Sublimada R1', url: '/logo/R1.png' },
+        { nombre: 'Taza Magica Sublimada 350ml', url: '/logo/R1.png' },
+        { nombre: 'Kepis', url: '/logo/R1.png' },
+      ],
+    };
+
+    let activePageFilter = 'todas'; // 'todas' | 'portada' | 'contenido' | 'fotos'
+    let currentZoom = 1;
+
+    // Encabezado principal del módulo
+    const topBar = document.createElement('div');
+    topBar.className =
+      'flex flex-wrap items-center justify-between gap-3 p-4 bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl shadow-xs';
+    topBar.innerHTML = `
+      <div class="flex items-center gap-3">
         <span class="w-10 h-10 rounded-xl bg-brand-soft dark:bg-brand/20 text-brand flex items-center justify-center shrink-0">
           <i class="fa-regular fa-file-lines text-lg"></i>
         </span>
         <div>
           <div class="flex items-center gap-2">
             <h2 class="text-sm sm:text-base font-bold text-slate-900 dark:text-white">
-              Diseñador de Plantillas de Presupuestos
+              Configuración de Presupuestos (PDF & Cotizaciones)
             </h2>
-            <span class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400">
-              @pdfme Client-Side
+            <span class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-brand-soft text-brand dark:bg-brand/20">
+              • Plantilla Oficial PDF
             </span>
           </div>
           <p class="text-xs text-slate-500 dark:text-slate-400">
-            Diseñe visualmente la plantilla de cotización para R1 personalizados. Renderizado 100% en el navegador con soporte de variables dinámicas y tablas.
+            Personalice las cláusulas legales de términos y condiciones y elija qué canales de presencia web aparecerán en el pie de página de sus presupuestos en PDF.
           </p>
         </div>
       </div>
-      <div id="budget-actions-top" class="flex flex-wrap items-center gap-2"></div>
+      <div id="top-budget-actions" class="flex flex-wrap items-center gap-2"></div>
     `;
-    card.appendChild(header);
 
-    // Barra de acciones superiores
-    const actionsTop = header.querySelector('#budget-actions-top');
-
-    const btnRestablecer = createButton({
-      text: 'Restablecer Base',
+    const topActions = topBar.querySelector('#top-budget-actions');
+    const btnRestablecerTop = createButton({
+      text: 'Restablecer',
       icon: 'fa-solid fa-rotate-left',
       variant: 'cancel',
       size: 'sm',
-      onClick: () => handleRestablecerBase(),
+      onClick: () => handleRestablecerDefaults(),
     });
-
-    const btnPreview = createButton({
-      text: 'Previsualizar PDF',
-      icon: 'fa-regular fa-eye',
+    const btnDescargarTop = createButton({
+      text: 'Descargar Muestra PDF',
+      icon: 'fa-solid fa-file-pdf',
       variant: 'primary',
       size: 'sm',
-      onClick: () => handlePrevisualizarPDF(),
+      onClick: () => handleDescargarMuestraPDF(),
     });
-
-    const btnGuardar = createButton({
-      text: 'Guardar Configuración',
+    const btnGuardarTop = createButton({
+      text: 'Guardar configuración de presupuestos',
       icon: 'fa-solid fa-floppy-disk',
       variant: 'primary',
       size: 'sm',
-      onClick: () => handleGuardarTemplate(),
+      onClick: () => handleGuardarConfig(),
     });
+    topActions.appendChild(btnRestablecerTop);
+    topActions.appendChild(btnDescargarTop);
+    topActions.appendChild(btnGuardarTop);
+    wrap.appendChild(topBar);
 
-    actionsTop.appendChild(btnRestablecer);
-    actionsTop.appendChild(btnPreview);
-    actionsTop.appendChild(btnGuardar);
+    // Contenedor Split-Screen (Grid responsivo de 2 columnas ocupando 100% alto)
+    const splitGrid = document.createElement('div');
+    splitGrid.className = 'flex-1 min-h-0 grid grid-cols-1 xl:grid-cols-12 gap-5 items-stretch';
 
-    // 2. Barra de configuración de página y opciones
-    const configBar = document.createElement('div');
-    configBar.className =
-      'grid grid-cols-1 md:grid-cols-4 gap-4 p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/60 text-xs';
-    configBar.innerHTML = `
-      <div>
-        <label class="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
-          <i class="fa-solid fa-ruler-combined mr-1 text-brand"></i> Tamaño de Página
-        </label>
-        <select id="budget-page-size" class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 focus:outline-hidden focus:ring-2 focus:ring-brand">
-          <option value="A4" selected>A4 (210 × 297 mm)</option>
-          <option value="Letter">Carta / Letter (215.9 × 279.4 mm)</option>
-          <option value="Legal">Oficio / Legal (215.9 × 355.6 mm)</option>
-          <option value="Custom">Personalizado (mm)</option>
-        </select>
-      </div>
+    // =========================================================================
+    // COLUMNA IZQUIERDA: Vista Previa del PDF (A4 Oficial) en Tiempo Real
+    // =========================================================================
+    const previewCol = document.createElement('div');
+    previewCol.className = 'xl:col-span-6 2xl:col-span-6 flex flex-col h-full min-h-0';
 
-      <div id="custom-size-container" class="hidden flex items-center gap-2">
-        <div class="flex-1">
-          <label class="block font-medium text-slate-600 dark:text-slate-400 mb-1">Ancho (mm)</label>
-          <input type="number" id="budget-custom-w" value="210" min="50" max="600" class="w-full px-2.5 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 text-xs" />
-        </div>
-        <div class="flex-1">
-          <label class="block font-medium text-slate-600 dark:text-slate-400 mb-1">Alto (mm)</label>
-          <input type="number" id="budget-custom-h" value="297" min="50" max="600" class="w-full px-2.5 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 text-xs" />
-        </div>
-      </div>
+    const previewCard = document.createElement('div');
+    previewCard.className =
+      'h-full flex flex-col min-h-0 rounded-2xl border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xs overflow-hidden';
 
-      <div>
-        <label class="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
-          <i class="fa-solid fa-arrows-spin mr-1 text-brand"></i> Orientación
-        </label>
-        <select id="budget-orientation" class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 focus:outline-hidden focus:ring-2 focus:ring-brand">
-          <option value="portrait" selected>Vertical (Portrait)</option>
-          <option value="landscape">Horizontal (Landscape)</option>
-        </select>
-      </div>
-
-      <div class="flex flex-col justify-center">
-        <span class="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
-          <i class="fa-regular fa-image mr-1 text-brand"></i> Hoja 2 de Fotos
+    // Barra superior de visualización
+    const previewToolbar = document.createElement('div');
+    previewToolbar.className =
+      'flex flex-wrap items-center justify-between gap-3 p-3.5 border-b border-slate-100 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/40 text-xs shrink-0';
+    previewToolbar.innerHTML = `
+      <div class="flex items-center gap-2">
+        <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+        <span class="font-bold text-slate-800 dark:text-slate-100">Vista Previa del PDF (A4 Oficial)</span>
+        <span class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400">
+          • Tiempo Real
         </span>
+      </div>
+      <div class="flex flex-wrap items-center gap-2">
+        <div class="flex items-center gap-1.5 bg-white dark:bg-slate-900 px-2 py-1 rounded-lg border border-slate-200 dark:border-slate-700">
+          <i class="fa-solid fa-magnifying-glass text-slate-400 text-[10px]"></i>
+          <span class="text-[11px] text-slate-500">Zoom:</span>
+          <select id="preview-zoom-select" class="bg-transparent font-medium text-slate-700 dark:text-slate-200 text-[11px] focus:outline-hidden">
+            <option value="0.5">50%</option>
+            <option value="0.75">75%</option>
+            <option value="1" selected>100% (A4 Real)</option>
+            <option value="fit">Ajustar ancho</option>
+          </select>
+        </div>
+        <div class="inline-flex rounded-lg border border-slate-200 dark:border-slate-700 p-0.5 bg-white dark:bg-slate-900" id="page-filter-btns">
+          <button type="button" data-filter="todas" class="px-2.5 py-1 rounded-md text-[11px] font-semibold transition bg-brand text-white">Todas</button>
+          <button type="button" data-filter="portada" class="px-2.5 py-1 rounded-md text-[11px] font-semibold text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition">Portada</button>
+          <button type="button" data-filter="contenido" class="px-2.5 py-1 rounded-md text-[11px] font-semibold text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition">Contenido</button>
+          <button type="button" data-filter="fotos" class="px-2.5 py-1 rounded-md text-[11px] font-semibold text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition">Fotos</button>
+        </div>
+      </div>
+    `;
+    previewCard.appendChild(previewToolbar);
+
+    // Contenedor con scroll para las páginas A4 ocupando todo el alto restante
+    const previewViewport = document.createElement('div');
+    previewViewport.id = 'preview-viewport-scroll';
+    previewViewport.className =
+      'w-full flex-1 min-h-0 overflow-y-auto bg-slate-200/70 dark:bg-slate-950 p-4 sm:p-6 flex flex-col items-center gap-6 rounded-b-2xl';
+
+    const pagesWrapper = document.createElement('div');
+    pagesWrapper.id = 'preview-pages-wrapper';
+    pagesWrapper.className = 'flex flex-col items-center gap-6 transition-transform origin-top';
+    previewViewport.appendChild(pagesWrapper);
+    previewCard.appendChild(previewViewport);
+    previewCol.appendChild(previewCard);
+    splitGrid.appendChild(previewCol);
+
+    // =========================================================================
+    // COLUMNA DERECHA: Panel de Configuración de Presupuestos (PDF & Cotizaciones)
+    // =========================================================================
+    const controlsCol = document.createElement('div');
+    controlsCol.className = 'xl:col-span-6 2xl:col-span-6 flex flex-col h-full min-h-0 overflow-y-auto pr-1 select-none space-y-4';
+
+    // -------------------------------------------------------------------------
+    // TARJETA 1: Tamaño de logo en carátula
+    // -------------------------------------------------------------------------
+    const cardCaratulaLogo = document.createElement('section');
+    cardCaratulaLogo.className = 'p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-4';
+    cardCaratulaLogo.innerHTML = `
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <span class="w-7 h-7 rounded-lg bg-brand-soft text-brand dark:bg-brand/20 flex items-center justify-center text-xs">
+            <i class="fa-solid fa-expand"></i>
+          </span>
+          <div>
+            <h3 class="text-xs sm:text-sm font-bold text-slate-800 dark:text-slate-100">Tamaño de logo en carátula</h3>
+            <p class="text-[11px] text-slate-500">Ajuste el tamaño del logo central que se muestra en la carátula oficial del presupuesto en PDF (mínimo 20 mm).</p>
+          </div>
+        </div>
+        <span class="px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
+          Logo Portada PDF
+        </span>
+      </div>
+
+      <div class="flex items-center gap-5 pt-1">
+        <!-- Miniatura carátula -->
+        <div class="w-24 shrink-0 text-center">
+          <div id="mini-cover-thumb" class="w-24 h-32 rounded-xl flex items-center justify-center shadow-xs transition-colors overflow-hidden border border-slate-700/20" style="background-color: ${cfg.caratula.estilo_color};">
+            <img id="mini-cover-logo" src="/logo/R1.png" alt="R1" class="transition-all" style="width: ${Math.max(12, cfg.caratula.logo_ancho * 0.45)}px;" />
+          </div>
+          <span class="text-[10px] text-slate-400 mt-1 block">Escala en carátula</span>
+        </div>
+
+        <!-- Slider y controles -->
+        <div class="flex-1 space-y-3">
+          <div class="flex items-center justify-between">
+            <label class="text-xs font-semibold text-slate-700 dark:text-slate-300">Ancho del logotipo:</label>
+            <span class="text-xs font-mono font-bold text-brand bg-brand-soft dark:bg-brand/20 px-2 py-0.5 rounded-md" id="badge-caratula-logo-val">${cfg.caratula.logo_ancho} mm</span>
+          </div>
+          <input type="range" id="slider-caratula-logo" min="20" max="170" step="1" value="${cfg.caratula.logo_ancho}" class="w-full accent-brand cursor-pointer" />
+          
+          <div>
+            <span class="text-[11px] text-slate-400 block mb-1.5">Tamaños sugeridos:</span>
+            <div class="flex flex-wrap gap-2">
+              <button type="button" class="btn-quick-val px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-semibold hover:border-brand hover:text-brand transition" data-target="slider-caratula-logo" data-val="20">20 mm</button>
+              <button type="button" class="btn-quick-val px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-semibold hover:border-brand hover:text-brand transition" data-target="slider-caratula-logo" data-val="50">50 mm</button>
+              <button type="button" class="btn-quick-val px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-semibold hover:border-brand hover:text-brand transition" data-target="slider-caratula-logo" data-val="80">80 mm</button>
+              <button type="button" class="btn-quick-val px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-semibold hover:border-brand hover:text-brand transition" data-target="slider-caratula-logo" data-val="110">110 mm</button>
+              <button type="button" class="btn-quick-val px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-semibold hover:border-brand hover:text-brand transition" data-target="slider-caratula-logo" data-val="140">140 mm</button>
+              <button type="button" class="btn-quick-val px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-semibold hover:border-brand hover:text-brand transition" data-target="slider-caratula-logo" data-val="170">170 mm</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+    controlsCol.appendChild(cardCaratulaLogo);
+
+    // -------------------------------------------------------------------------
+    // TARJETA 2: Tamaño de textos en Página 2
+    // -------------------------------------------------------------------------
+    const cardTextosP2 = document.createElement('section');
+    cardTextosP2.className = 'p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-4';
+    cardTextosP2.innerHTML = `
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <span class="w-7 h-7 rounded-lg bg-blue-50 text-blue-600 dark:bg-blue-950/50 flex items-center justify-center text-xs">
+            <i class="fa-solid fa-font"></i>
+          </span>
+          <div>
+            <h3 class="text-xs sm:text-sm font-bold text-slate-800 dark:text-slate-100">Tamaño de textos en Página 2</h3>
+            <p class="text-[11px] text-slate-500">Ajuste o reduzca la escala de los textos, tablas y cláusulas aplicable únicamente a la página 2 de contenido.</p>
+          </div>
+        </div>
+        <span class="text-xs font-mono font-bold text-brand bg-brand-soft dark:bg-brand/20 px-2 py-0.5 rounded-md" id="badge-textos-p2-val">${cfg.pagina2.tamano_textos_porcentaje}% • Normal</span>
+      </div>
+
+      <div class="space-y-3 pt-1">
+        <input type="range" id="slider-textos-p2" min="70" max="100" step="5" value="${cfg.pagina2.tamano_textos_porcentaje}" class="w-full accent-brand cursor-pointer" />
+        <div class="flex flex-wrap gap-2">
+          <button type="button" class="btn-quick-val px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-semibold hover:border-brand hover:text-brand transition" data-target="slider-textos-p2" data-val="100">100% (Normal)</button>
+          <button type="button" class="btn-quick-val px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-semibold hover:border-brand hover:text-brand transition" data-target="slider-textos-p2" data-val="90">90% (Mediano)</button>
+          <button type="button" class="btn-quick-val px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-semibold hover:border-brand hover:text-brand transition" data-target="slider-textos-p2" data-val="80">80% (Compacto)</button>
+          <button type="button" class="btn-quick-val px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-semibold hover:border-brand hover:text-brand transition" data-target="slider-textos-p2" data-val="70">70% (Reducido)</button>
+        </div>
+      </div>
+    `;
+    controlsCol.appendChild(cardTextosP2);
+
+    // -------------------------------------------------------------------------
+    // TARJETA 3: Separación manual entre bloques
+    // -------------------------------------------------------------------------
+    const cardSeparacion = document.createElement('section');
+    cardSeparacion.className = 'p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-4';
+    cardSeparacion.innerHTML = `
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <span class="w-7 h-7 rounded-lg bg-emerald-50 text-emerald-600 dark:bg-emerald-950/50 flex items-center justify-center text-xs">
+            <i class="fa-solid fa-arrows-up-down"></i>
+          </span>
+          <div>
+            <h3 class="text-xs sm:text-sm font-bold text-slate-800 dark:text-slate-100">Separación manual entre bloques</h3>
+            <p class="text-[11px] text-slate-500">Ajuste el espaciado vertical entre el encabezado, cliente, tabla de productos, totales y cláusulas legales.</p>
+          </div>
+        </div>
+        <span class="text-xs font-mono font-bold text-brand bg-brand-soft dark:bg-brand/20 px-2 py-0.5 rounded-md" id="badge-separacion-val">${cfg.pagina2.separacion_bloques_px} px • Estándar</span>
+      </div>
+
+      <div class="space-y-3 pt-1">
+        <input type="range" id="slider-separacion" min="12" max="40" step="2" value="${cfg.pagina2.separacion_bloques_px}" class="w-full accent-brand cursor-pointer" />
+        <div class="flex flex-wrap gap-2">
+          <button type="button" class="btn-quick-val px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-semibold hover:border-brand hover:text-brand transition" data-target="slider-separacion" data-val="12">12 px (Apretado)</button>
+          <button type="button" class="btn-quick-val px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-semibold hover:border-brand hover:text-brand transition" data-target="slider-separacion" data-val="20">20 px (Estándar)</button>
+          <button type="button" class="btn-quick-val px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-semibold hover:border-brand hover:text-brand transition" data-target="slider-separacion" data-val="30">30 px (Amplio)</button>
+          <button type="button" class="btn-quick-val px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-semibold hover:border-brand hover:text-brand transition" data-target="slider-separacion" data-val="40">40 px (Extendido)</button>
+        </div>
+      </div>
+    `;
+    controlsCol.appendChild(cardSeparacion);
+
+    // -------------------------------------------------------------------------
+    // TARJETA 4: Estilo y color de presupuesto
+    // -------------------------------------------------------------------------
+    const cardColor = document.createElement('section');
+    cardColor.className = 'p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-4';
+    cardColor.innerHTML = `
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <span class="w-7 h-7 rounded-lg bg-amber-50 text-amber-600 dark:bg-amber-950/50 flex items-center justify-center text-xs">
+            <i class="fa-solid fa-palette"></i>
+          </span>
+          <div>
+            <h3 class="text-xs sm:text-sm font-bold text-slate-800 dark:text-slate-100">Estilo y color de presupuesto</h3>
+            <p class="text-[11px] text-slate-500">Seleccione el color temático para la carátula oficial y acentos del presupuesto en PDF.</p>
+          </div>
+        </div>
+        <span class="px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
+          Fondo y Acentos
+        </span>
+      </div>
+
+      <div class="flex flex-wrap items-center gap-4 pt-1">
+        <div class="flex items-center gap-3">
+          <div class="relative">
+            <input type="color" id="picker-estilo-color" value="${cfg.caratula.estilo_color}" class="w-12 h-12 rounded-xl cursor-pointer border border-slate-300 dark:border-slate-700 p-0.5 bg-transparent" />
+          </div>
+          <div>
+            <span class="text-[11px] text-slate-400 block">Color Seleccionado</span>
+            <input type="text" id="input-estilo-color-hex" value="${cfg.caratula.estilo_color}" class="w-24 px-2 py-1 text-xs font-mono rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 uppercase font-semibold text-slate-800 dark:text-slate-200" />
+          </div>
+        </div>
+
+        <div class="flex-1 min-w-[200px]">
+          <span class="text-[11px] text-slate-400 block mb-1.5">Colores Corporativos Predefinidos:</span>
+          <div class="flex flex-wrap gap-2" id="preset-colors-group">
+            <button type="button" class="btn-color-preset inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-semibold hover:border-brand transition" data-color="#435A62">
+              <span class="w-2.5 h-2.5 rounded-full" style="background-color: #435A62;"></span> #435A62 (Pizarra)
+            </button>
+            <button type="button" class="btn-color-preset inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-semibold hover:border-brand transition" data-color="#14281D">
+              <span class="w-2.5 h-2.5 rounded-full" style="background-color: #14281D;"></span> #14281D (Verde)
+            </button>
+            <button type="button" class="btn-color-preset inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-semibold hover:border-brand transition" data-color="#1E293B">
+              <span class="w-2.5 h-2.5 rounded-full" style="background-color: #1E293B;"></span> #1E293B (Slate)
+            </button>
+            <button type="button" class="btn-color-preset inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-semibold hover:border-brand transition" data-color="#1A1A1A">
+              <span class="w-2.5 h-2.5 rounded-full" style="background-color: #1A1A1A;"></span> #1A1A1A (Negro)
+            </button>
+            <button type="button" class="btn-color-preset inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-semibold hover:border-brand transition" data-color="#2C3E50">
+              <span class="w-2.5 h-2.5 rounded-full" style="background-color: #2C3E50;"></span> #2C3E50 (Navy)
+            </button>
+            <button type="button" class="btn-color-preset inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-semibold hover:border-brand transition" data-color="#4A2E75">
+              <span class="w-2.5 h-2.5 rounded-full" style="background-color: #4A2E75;"></span> #4A2E75 (Violeta)
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
+    controlsCol.appendChild(cardColor);
+
+    // -------------------------------------------------------------------------
+    // TARJETA 5: Logotipo en cabecera (Página 2)
+    // -------------------------------------------------------------------------
+    const cardLogoCabecera = document.createElement('section');
+    cardLogoCabecera.className = 'p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-4';
+    cardLogoCabecera.innerHTML = `
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <span class="w-7 h-7 rounded-lg bg-purple-50 text-purple-600 dark:bg-purple-950/50 flex items-center justify-center text-xs">
+            <i class="fa-regular fa-image"></i>
+          </span>
+          <div>
+            <h3 class="text-xs sm:text-sm font-bold text-slate-800 dark:text-slate-100">Logotipo en cabecera (Página 2)</h3>
+            <p class="text-[11px] text-slate-500">Ajuste el tamaño del logo en la parte superior de la página 2 u ocúltelo si no desea mostrarlo.</p>
+          </div>
+        </div>
+        <label class="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-700 dark:text-slate-300 cursor-pointer">
+          <input type="checkbox" id="chk-logo-p2-visible" ${cfg.pagina2.cabecera_logo_visible ? 'checked' : ''} class="w-4 h-4 rounded text-brand focus:ring-brand" />
+          <span>Visible</span>
+        </label>
+      </div>
+
+      <div class="space-y-3 pt-1">
         <div class="flex items-center justify-between">
-          <span class="text-slate-500 dark:text-slate-400 text-[11px]">Grilla de imágenes presupuestadas</span>
-          <label class="relative inline-flex items-center cursor-pointer select-none">
-            <input type="checkbox" id="budget-toggle-fotos" class="sr-only peer" checked />
-            <div class="w-11 h-6 bg-slate-200 peer-focus:outline-hidden rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-slate-600 peer-checked:bg-blue-600"></div>
+          <label class="text-xs font-semibold text-slate-700 dark:text-slate-300">Altura / Tamaño del logo:</label>
+          <span class="text-xs font-mono font-bold text-brand bg-brand-soft dark:bg-brand/20 px-2 py-0.5 rounded-md" id="badge-logo-p2-val">${cfg.pagina2.cabecera_logo_alto} mm • Estándar</span>
+        </div>
+        <input type="range" id="slider-logo-p2" min="16" max="52" step="2" value="${cfg.pagina2.cabecera_logo_alto}" class="w-full accent-brand cursor-pointer" />
+        <div class="flex flex-wrap gap-2">
+          <button type="button" class="btn-quick-val px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-semibold hover:border-brand hover:text-brand transition" data-target="slider-logo-p2" data-val="16">16 mm (Mini)</button>
+          <button type="button" class="btn-quick-val px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-semibold hover:border-brand hover:text-brand transition" data-target="slider-logo-p2" data-val="22">22 mm (Compacto)</button>
+          <button type="button" class="btn-quick-val px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-semibold hover:border-brand hover:text-brand transition" data-target="slider-logo-p2" data-val="28">28 mm (Estándar)</button>
+          <button type="button" class="btn-quick-val px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-semibold hover:border-brand hover:text-brand transition" data-target="slider-logo-p2" data-val="38">38 mm (Mediano)</button>
+          <button type="button" class="btn-quick-val px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-semibold hover:border-brand hover:text-brand transition" data-target="slider-logo-p2" data-val="52">52 mm (Grande)</button>
+        </div>
+      </div>
+    `;
+    controlsCol.appendChild(cardLogoCabecera);
+
+    // -------------------------------------------------------------------------
+    // TARJETA 6: Título en barra oficial (Página 2)
+    // -------------------------------------------------------------------------
+    const cardTituloBarra = document.createElement('section');
+    cardTituloBarra.className = 'p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-3';
+    cardTituloBarra.innerHTML = `
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <span class="w-7 h-7 rounded-lg bg-indigo-50 text-indigo-600 dark:bg-indigo-950/50 flex items-center justify-center text-xs">
+            <i class="fa-solid fa-heading"></i>
+          </span>
+          <div>
+            <h3 class="text-xs sm:text-sm font-bold text-slate-800 dark:text-slate-100">Título en barra oficial (Página 2)</h3>
+            <p class="text-[11px] text-slate-500">Modifique a gusto el texto de la barra oficial ("Presupuesto Oficial") o inhabilite la barra por completo.</p>
+          </div>
+        </div>
+        <label class="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-700 dark:text-slate-300 cursor-pointer">
+          <input type="checkbox" id="chk-titulo-barra-visible" ${cfg.pagina2.titulo_barra_visible ? 'checked' : ''} class="w-4 h-4 rounded text-brand focus:ring-brand" />
+          <span>Visible</span>
+        </label>
+      </div>
+
+      <div class="space-y-1.5 pt-1">
+        <label class="text-[11px] font-semibold text-slate-600 dark:text-slate-400">Texto a mostrar en la barra:</label>
+        <div class="flex items-center gap-2">
+          <input type="text" id="input-titulo-barra" value="${escapeHtml(cfg.pagina2.titulo_barra_texto)}" class="flex-1 px-3 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 font-bold tracking-wider" />
+          <button type="button" id="btn-def-titulo-barra" class="px-3 py-2 text-xs font-semibold rounded-lg border border-slate-200 dark:border-slate-700 text-slate-600 hover:border-brand hover:text-brand transition">Por defecto</button>
+        </div>
+      </div>
+    `;
+    controlsCol.appendChild(cardTituloBarra);
+
+    // -------------------------------------------------------------------------
+    // TARJETA 7: Foto del producto en Descripción (Página 2)
+    // -------------------------------------------------------------------------
+    const cardFotoDescripcion = document.createElement('section');
+    cardFotoDescripcion.className = 'p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs flex items-center justify-between';
+    cardFotoDescripcion.innerHTML = `
+      <div class="flex items-center gap-2">
+        <span class="w-7 h-7 rounded-lg bg-sky-50 text-sky-600 dark:bg-sky-950/50 flex items-center justify-center text-xs">
+          <i class="fa-regular fa-image"></i>
+        </span>
+        <div>
+          <h3 class="text-xs sm:text-sm font-bold text-slate-800 dark:text-slate-100">Foto del producto en Descripción (Página 2)</h3>
+          <p class="text-[11px] text-slate-500">Permite habilitar o inhabilitar la miniatura con foto de cada producto junto a su nombre en la tabla de cotización.</p>
+        </div>
+      </div>
+      <label class="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-700 dark:text-slate-300 cursor-pointer">
+        <input type="checkbox" id="chk-foto-desc-visible" ${cfg.pagina2.foto_producto_descripcion ? 'checked' : ''} class="w-4 h-4 rounded text-brand focus:ring-brand" />
+        <span>Visible</span>
+      </label>
+    `;
+    controlsCol.appendChild(cardFotoDescripcion);
+
+    // -------------------------------------------------------------------------
+    // TARJETA 8: Cuadro de Descuento / Promoción (Página 2)
+    // -------------------------------------------------------------------------
+    const cardDescuento = document.createElement('section');
+    cardDescuento.className = 'p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-4';
+    cardDescuento.innerHTML = `
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <span class="w-7 h-7 rounded-lg bg-rose-50 text-rose-600 dark:bg-rose-950/50 flex items-center justify-center text-xs">
+            <i class="fa-solid fa-tag"></i>
+          </span>
+          <div>
+            <h3 class="text-xs sm:text-sm font-bold text-slate-800 dark:text-slate-100">Cuadro de Descuento / Promoción (Página 2)</h3>
+            <p class="text-[11px] text-slate-500">Habilite un texto o cuadro destacado junto a los totales para informar el motivo del descuento o porcentaje aplicable (ej. pago al contado, volumen).</p>
+          </div>
+        </div>
+        <label class="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-700 dark:text-slate-300 cursor-pointer">
+          <input type="checkbox" id="chk-descuento-visible" ${cfg.pagina2.descuento.visible ? 'checked' : ''} class="w-4 h-4 rounded text-brand focus:ring-brand" />
+          <span>Visible</span>
+        </label>
+      </div>
+
+      <div class="space-y-3 pt-1">
+        <label class="inline-flex items-center gap-2 text-xs font-semibold text-slate-700 dark:text-slate-300 cursor-pointer">
+          <input type="checkbox" id="chk-descuento-borde" ${cfg.pagina2.descuento.mostrar_cuadro_borde ? 'checked' : ''} class="w-4 h-4 rounded text-brand focus:ring-brand" />
+          <span>Mostrar dentro de un cuadro con marco/borde destacado (si se desmarca, se muestra como insignia simple)</span>
+        </label>
+
+        <div>
+          <label class="text-[11px] font-semibold text-slate-600 dark:text-slate-400 block mb-1">Texto o Motivo del Descuento / % a mostrar:</label>
+          <div class="flex items-center gap-2">
+            <input type="text" id="input-descuento-texto" value="${escapeHtml(cfg.pagina2.descuento.texto)}" class="flex-1 px-3 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 font-bold" />
+            <button type="button" id="btn-def-descuento-texto" class="px-3 py-2 text-xs font-semibold rounded-lg border border-slate-200 dark:border-slate-700 text-slate-600 hover:border-brand hover:text-brand transition">Por defecto</button>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div>
+            <label class="text-[11px] font-semibold text-slate-600 dark:text-slate-400 block mb-1">Color de Fondo</label>
+            <div class="flex items-center gap-2">
+              <input type="color" id="picker-desc-bg" value="${cfg.pagina2.descuento.color_fondo}" class="w-8 h-8 rounded-lg cursor-pointer border border-slate-300 p-0.5 bg-transparent" />
+              <input type="text" id="input-desc-bg-hex" value="${cfg.pagina2.descuento.color_fondo}" class="w-full px-2 py-1 text-xs font-mono rounded-lg border border-slate-200 dark:border-slate-700 uppercase" />
+            </div>
+          </div>
+          <div>
+            <label class="text-[11px] font-semibold text-slate-600 dark:text-slate-400 block mb-1">Color de Texto</label>
+            <div class="flex items-center gap-2">
+              <input type="color" id="picker-desc-text" value="${cfg.pagina2.descuento.color_texto}" class="w-8 h-8 rounded-lg cursor-pointer border border-slate-300 p-0.5 bg-transparent" />
+              <input type="text" id="input-desc-text-hex" value="${cfg.pagina2.descuento.color_texto}" class="w-full px-2 py-1 text-xs font-mono rounded-lg border border-slate-200 dark:border-slate-700 uppercase" />
+            </div>
+          </div>
+          <div>
+            <label class="text-[11px] font-semibold text-slate-600 dark:text-slate-400 block mb-1">Color de Borde / Marco</label>
+            <div class="flex items-center gap-2">
+              <input type="color" id="picker-desc-border" value="${cfg.pagina2.descuento.color_borde}" class="w-8 h-8 rounded-lg cursor-pointer border border-slate-300 p-0.5 bg-transparent" />
+              <input type="text" id="input-desc-border-hex" value="${cfg.pagina2.descuento.color_borde}" class="w-full px-2 py-1 text-xs font-mono rounded-lg border border-slate-200 dark:border-slate-700 uppercase" />
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <span class="text-[11px] text-slate-400 block mb-1.5">Estilos sugeridos:</span>
+          <div class="flex flex-wrap gap-2">
+            <button type="button" class="btn-desc-preset inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-semibold hover:border-brand transition" data-bg="#F0FDF4" data-text="#15803D" data-border="#BBF7D0">
+              <span class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span> Verde Esmeralda (Éxito / Ahorro)
+            </button>
+            <button type="button" class="btn-desc-preset inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-semibold hover:border-brand transition" data-bg="#F5F3FF" data-text="#7C3AED" data-border="#DDD6FE">
+              <span class="w-2.5 h-2.5 rounded-full bg-purple-500"></span> Violeta Marca (Elegante)
+            </button>
+            <button type="button" class="btn-desc-preset inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-semibold hover:border-brand transition" data-bg="#FFFBEB" data-text="#B45309" data-border="#FDE68A">
+              <span class="w-2.5 h-2.5 rounded-full bg-amber-500"></span> Ámbar Dorado (Promoción)
+            </button>
+            <button type="button" class="btn-desc-preset inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-semibold hover:border-brand transition" data-bg="#FEF2F2" data-text="#DC2626" data-border="#FECACA">
+              <span class="w-2.5 h-2.5 rounded-full bg-rose-500"></span> Rojo Suave (Descuento Exclusivo)
+            </button>
+            <button type="button" class="btn-desc-preset inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-semibold hover:border-brand transition" data-bg="#F8FAFC" data-text="#475569" data-border="#E2E8F0">
+              <span class="w-2.5 h-2.5 rounded-full bg-slate-500"></span> Gris Neutro (Sobrio)
+            </button>
+          </div>
+        </div>
+
+        <div class="pt-2">
+          <span class="text-[11px] text-slate-400 block mb-1">Muestra preliminar:</span>
+          <div id="desc-live-preview-box" class="p-2.5 text-center font-bold text-xs rounded-lg transition-all" style="background-color: ${cfg.pagina2.descuento.color_fondo}; color: ${cfg.pagina2.descuento.color_texto}; border: 1px solid ${cfg.pagina2.descuento.color_borde};">
+            ${escapeHtml(cfg.pagina2.descuento.texto)}
+          </div>
+        </div>
+      </div>
+    `;
+    controlsCol.appendChild(cardDescuento);
+
+    // -------------------------------------------------------------------------
+    // TARJETA 9: Términos y Condiciones (Página 2)
+    // -------------------------------------------------------------------------
+    const cardTerminos = document.createElement('section');
+    cardTerminos.className = 'p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-4';
+    cardTerminos.innerHTML = `
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <span class="w-7 h-7 rounded-lg bg-teal-50 text-teal-600 dark:bg-teal-950/50 flex items-center justify-center text-xs">
+            <i class="fa-solid fa-list-check"></i>
+          </span>
+          <div>
+            <h3 class="text-xs sm:text-sm font-bold text-slate-800 dark:text-slate-100">Términos y Condiciones (Página 2)</h3>
+            <p class="text-[11px] text-slate-500">Mueva libremente la posición entre la tabla/totales y el pie de página. El texto se auto-ajusta para no desbordar.</p>
+          </div>
+        </div>
+        <span class="text-xs font-mono font-bold text-brand bg-brand-soft dark:bg-brand/20 px-2 py-0.5 rounded-md" id="badge-terminos-pos-val">${cfg.pagina2.terminos.posicion_vertical_px} px</span>
+      </div>
+
+      <div class="space-y-4 pt-1">
+        <div>
+          <div class="flex items-center justify-between mb-1.5">
+            <label class="text-[11px] font-semibold text-slate-600 dark:text-slate-400">Posición vertical (Mover libremente entre totales y pie de página):</label>
+            <span class="text-[10px] text-slate-400">0 px = Junto a Totales (Línea roja)</span>
+          </div>
+          <input type="range" id="slider-terminos-pos" min="0" max="140" step="2" value="${cfg.pagina2.terminos.posicion_vertical_px}" class="w-full accent-brand cursor-pointer" />
+          <div class="flex flex-wrap gap-2 mt-2">
+            <button type="button" class="btn-quick-val px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-semibold hover:border-brand hover:text-brand transition" data-target="slider-terminos-pos" data-val="0">0 px (Junto a Totales)</button>
+            <button type="button" class="btn-quick-val px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-semibold hover:border-brand hover:text-brand transition" data-target="slider-terminos-pos" data-val="20">20 px (Estándar)</button>
+            <button type="button" class="btn-quick-val px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-semibold hover:border-brand hover:text-brand transition" data-target="slider-terminos-pos" data-val="50">50 px (Medio)</button>
+            <button type="button" class="btn-quick-val px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-semibold hover:border-brand hover:text-brand transition" data-target="slider-terminos-pos" data-val="90">90 px (Bajo)</button>
+            <button type="button" class="btn-quick-val px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-semibold hover:border-brand hover:text-brand transition" data-target="slider-terminos-pos" data-val="140">140 px (Al Pie de Página)</button>
+          </div>
+        </div>
+
+        <div>
+          <div class="flex items-center justify-between mb-1.5">
+            <label class="text-[11px] font-semibold text-slate-600 dark:text-slate-400">Título editable (Barra con formato, tamaño, fuente, color y alineación):</label>
+            <button type="button" id="btn-def-terminos-titulo" class="text-[11px] font-semibold text-slate-500 hover:text-brand transition"><i class="fa-solid fa-rotate-left mr-1"></i>Por defecto</button>
+          </div>
+          <div id="container-rich-editor-titulo" class="w-full"></div>
+        </div>
+
+        <div>
+          <div class="flex items-center justify-between mb-1.5">
+            <label class="text-[11px] font-semibold text-slate-600 dark:text-slate-400">Cláusulas operativas (Barra completa con listas, negrita, color y alineación):</label>
+            <button type="button" id="btn-def-terminos-clausulas" class="text-[11px] font-semibold text-slate-500 hover:text-brand transition"><i class="fa-solid fa-rotate-left mr-1"></i>Restablecer Cláusulas</button>
+          </div>
+          <div id="container-rich-editor-clausulas" class="w-full"></div>
+        </div>
+      </div>
+    `;
+    controlsCol.appendChild(cardTerminos);
+
+    // -------------------------------------------------------------------------
+    // TARJETA 10: Página de Fotos / Galería de Productos (Página 3)
+    // -------------------------------------------------------------------------
+    const cardPagina3 = document.createElement('section');
+    cardPagina3.className = 'p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-4';
+    cardPagina3.innerHTML = `
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <span class="w-7 h-7 rounded-lg bg-pink-50 text-pink-600 dark:bg-pink-950/50 flex items-center justify-center text-xs">
+            <i class="fa-solid fa-images"></i>
+          </span>
+          <div>
+            <h3 class="text-xs sm:text-sm font-bold text-slate-800 dark:text-slate-100">Página de Fotos / Galería de Productos (Página 3)</h3>
+            <p class="text-[11px] text-slate-500">Adjunta una página adicional al presupuesto con las fotos ampliadas de los productos seleccionados y sus nombres debajo.</p>
+          </div>
+        </div>
+        <label class="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-700 dark:text-slate-300 cursor-pointer">
+          <input type="checkbox" id="chk-p3-visible" ${cfg.pagina3.visible ? 'checked' : ''} class="w-4 h-4 rounded text-brand focus:ring-brand" />
+          <span>Visible</span>
+        </label>
+      </div>
+
+      <div class="space-y-4 pt-1">
+        <div>
+          <div class="flex items-center justify-between mb-1">
+            <label class="text-[11px] font-semibold text-slate-600 dark:text-slate-400">Título / Encabezado de Página 3:</label>
+            <label class="inline-flex items-center gap-1 text-[11px] font-medium text-slate-500 cursor-pointer">
+              <input type="checkbox" id="chk-p3-titulo-visible" ${cfg.pagina3.titulo_visible ? 'checked' : ''} class="w-3.5 h-3.5 rounded text-brand focus:ring-brand" />
+              <span>Visible</span>
+            </label>
+          </div>
+          <div class="flex items-center gap-2">
+            <input type="text" id="input-p3-titulo" value="${escapeHtml(cfg.pagina3.titulo)}" class="flex-1 px-3 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 font-bold" />
+            <button type="button" id="btn-def-p3-titulo" class="px-3 py-2 text-xs font-semibold rounded-lg border border-slate-200 dark:border-slate-700 text-slate-600 hover:border-brand hover:text-brand transition">Por defecto</button>
+          </div>
+        </div>
+
+        <div>
+          <div class="flex items-center justify-between mb-1">
+            <label class="text-[11px] font-semibold text-slate-600 dark:text-slate-400">Posición vertical de las fotos (Alzar o Bajar):</label>
+            <span class="text-xs font-mono font-bold text-brand bg-brand-soft dark:bg-brand/20 px-2 py-0.5 rounded-md" id="badge-p3-pos-v">${cfg.pagina3.posicion_vertical_px} px • Estándar</span>
+          </div>
+          <input type="range" id="slider-p3-pos-v" min="0" max="90" step="2" value="${cfg.pagina3.posicion_vertical_px}" class="w-full accent-brand cursor-pointer" />
+          <div class="flex flex-wrap gap-2 mt-2">
+            <button type="button" class="btn-quick-val px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-semibold hover:border-brand hover:text-brand transition" data-target="slider-p3-pos-v" data-val="0">0 px (Arriba)</button>
+            <button type="button" class="btn-quick-val px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-semibold hover:border-brand hover:text-brand transition" data-target="slider-p3-pos-v" data-val="20">20 px (Estándar)</button>
+            <button type="button" class="btn-quick-val px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-semibold hover:border-brand hover:text-brand transition" data-target="slider-p3-pos-v" data-val="50">50 px (Medio)</button>
+            <button type="button" class="btn-quick-val px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-semibold hover:border-brand hover:text-brand transition" data-target="slider-p3-pos-v" data-val="90">90 px (Bajo)</button>
+          </div>
+        </div>
+
+        <div>
+          <div class="flex items-center justify-between mb-1">
+            <label class="text-[11px] font-semibold text-slate-600 dark:text-slate-400">Posición horizontal de las fotos (Mover a los lados):</label>
+            <span class="text-xs font-mono font-bold text-brand bg-brand-soft dark:bg-brand/20 px-2 py-0.5 rounded-md" id="badge-p3-pos-h">${cfg.pagina3.posicion_horizontal_px} px • Centrado</span>
+          </div>
+          <input type="range" id="slider-p3-pos-h" min="-30" max="30" step="2" value="${cfg.pagina3.posicion_horizontal_px}" class="w-full accent-brand cursor-pointer" />
+          <div class="flex flex-wrap gap-2 mt-2">
+            <button type="button" class="btn-quick-val px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-semibold hover:border-brand hover:text-brand transition" data-target="slider-p3-pos-h" data-val="-30">-30 px (Izquierda)</button>
+            <button type="button" class="btn-quick-val px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-semibold hover:border-brand hover:text-brand transition" data-target="slider-p3-pos-h" data-val="0">0 px (Centrado)</button>
+            <button type="button" class="btn-quick-val px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-semibold hover:border-brand hover:text-brand transition" data-target="slider-p3-pos-h" data-val="30">+30 px (Derecha)</button>
+          </div>
+        </div>
+
+        <div>
+          <div class="flex items-center justify-between mb-1">
+            <label class="text-[11px] font-semibold text-slate-600 dark:text-slate-400">Separación entre las fotos:</label>
+            <span class="text-xs font-mono font-bold text-brand bg-brand-soft dark:bg-brand/20 px-2 py-0.5 rounded-md" id="badge-p3-gap">${cfg.pagina3.separacion_fotos_px} px • Estándar</span>
+          </div>
+          <input type="range" id="slider-p3-gap" min="2" max="32" step="1" value="${cfg.pagina3.separacion_fotos_px}" class="w-full accent-brand cursor-pointer" />
+          <div class="flex flex-wrap gap-2 mt-2">
+            <button type="button" class="btn-quick-val px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-semibold hover:border-brand hover:text-brand transition" data-target="slider-p3-gap" data-val="2">2 px (Mínimo)</button>
+            <button type="button" class="btn-quick-val px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-semibold hover:border-brand hover:text-brand transition" data-target="slider-p3-gap" data-val="6">6 px (Estrecho)</button>
+            <button type="button" class="btn-quick-val px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-semibold hover:border-brand hover:text-brand transition" data-target="slider-p3-gap" data-val="12">12 px (Compacto)</button>
+            <button type="button" class="btn-quick-val px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-semibold hover:border-brand hover:text-brand transition" data-target="slider-p3-gap" data-val="16">16 px (Estándar)</button>
+            <button type="button" class="btn-quick-val px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-semibold hover:border-brand hover:text-brand transition" data-target="slider-p3-gap" data-val="24">24 px (Medio)</button>
+            <button type="button" class="btn-quick-val px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-semibold hover:border-brand hover:text-brand transition" data-target="slider-p3-gap" data-val="32">32 px (Amplio)</button>
+          </div>
+        </div>
+
+        <div>
+          <div class="flex items-center justify-between mb-1">
+            <label class="text-[11px] font-semibold text-slate-600 dark:text-slate-400">Tamaño / Altura de cada foto:</label>
+            <span class="text-xs font-mono font-bold text-brand bg-brand-soft dark:bg-brand/20 px-2 py-0.5 rounded-md" id="badge-p3-altura">${cfg.pagina3.altura_foto_mm} mm</span>
+          </div>
+          <input type="range" id="slider-p3-altura" min="10" max="130" step="2" value="${cfg.pagina3.altura_foto_mm}" class="w-full accent-brand cursor-pointer" />
+          <div class="flex flex-wrap gap-2 mt-2">
+            <button type="button" class="btn-quick-val px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-semibold hover:border-brand hover:text-brand transition" data-target="slider-p3-altura" data-val="10">10 mm (Mini)</button>
+            <button type="button" class="btn-quick-val px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-semibold hover:border-brand hover:text-brand transition" data-target="slider-p3-altura" data-val="25">25 mm (Muy Chico)</button>
+            <button type="button" class="btn-quick-val px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-semibold hover:border-brand hover:text-brand transition" data-target="slider-p3-altura" data-val="50">50 mm (Compacto)</button>
+            <button type="button" class="btn-quick-val px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-semibold hover:border-brand hover:text-brand transition" data-target="slider-p3-altura" data-val="80">80 mm (Mediano)</button>
+            <button type="button" class="btn-quick-val px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-semibold hover:border-brand hover:text-brand transition" data-target="slider-p3-altura" data-val="105">105 mm (Grande)</button>
+            <button type="button" class="btn-quick-val px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-semibold hover:border-brand hover:text-brand transition" data-target="slider-p3-altura" data-val="130">130 mm (Máximo)</button>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label class="text-[11px] font-semibold text-slate-600 dark:text-slate-400 block mb-1">Ajuste / Encuadre de cada foto:</label>
+            <select id="select-p3-ajuste" class="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900">
+              <option value="contain" ${cfg.pagina3.ajuste_foto === 'contain' ? 'selected' : ''}>Contener completa (Proporcional sin recortes)</option>
+              <option value="cover" ${cfg.pagina3.ajuste_foto === 'cover' ? 'selected' : ''}>Cubrir contenedor (Recorte centrado)</option>
+            </select>
+          </div>
+          <div>
+            <label class="text-[11px] font-semibold text-slate-600 dark:text-slate-400 block mb-1">Columnas por fila:</label>
+            <select id="select-p3-columnas" class="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900">
+              <option value="2" ${cfg.pagina3.columnas_por_fila === 2 ? 'selected' : ''}>2 Columnas (Fotos destacadas)</option>
+              <option value="3" ${cfg.pagina3.columnas_por_fila === 3 ? 'selected' : ''}>3 Columnas (Galería compacta)</option>
+              <option value="1" ${cfg.pagina3.columnas_por_fila === 1 ? 'selected' : ''}>1 Columna (Fotos grandes)</option>
+            </select>
+          </div>
+        </div>
+
+        <label class="inline-flex items-center gap-2 text-xs font-semibold text-slate-700 dark:text-slate-300 cursor-pointer">
+          <input type="checkbox" id="chk-p3-mostrar-nombre" ${cfg.pagina3.mostrar_nombre_producto ? 'checked' : ''} class="w-4 h-4 rounded text-brand focus:ring-brand" />
+          <span>Mostrar nombre del producto debajo de la foto</span>
+        </label>
+      </div>
+    `;
+    controlsCol.appendChild(cardPagina3);
+
+    // -------------------------------------------------------------------------
+    // TARJETA 11: Pie de Página (Redes Sociales y Presencia Web)
+    // -------------------------------------------------------------------------
+    const cardPiePagina = document.createElement('section');
+    cardPiePagina.className = 'p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-4';
+    cardPiePagina.innerHTML = `
+      <div class="flex items-center gap-2">
+        <span class="w-7 h-7 rounded-lg bg-teal-50 text-teal-600 dark:bg-teal-950/50 flex items-center justify-center text-xs">
+          <i class="fa-solid fa-share-nodes"></i>
+        </span>
+        <div>
+          <h3 class="text-xs sm:text-sm font-bold text-slate-800 dark:text-slate-100">Pie de Página (Redes Sociales y Presencia Web)</h3>
+          <p class="text-[11px] text-slate-500">Configure los enlaces, datos de contacto oficiales y mensaje de cierre en la base de cada hoja.</p>
+        </div>
+      </div>
+
+      <div class="space-y-3 pt-1">
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          <label class="flex items-center gap-2 p-2.5 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-medium cursor-pointer">
+            <input type="checkbox" id="chk-red-facebook" ${cfg.pie_pagina.redes.facebook ? 'checked' : ''} class="w-4 h-4 rounded text-brand" />
+            <i class="fa-brands fa-facebook text-blue-600"></i> Facebook
+          </label>
+          <label class="flex items-center gap-2 p-2.5 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-medium cursor-pointer">
+            <input type="checkbox" id="chk-red-instagram" ${cfg.pie_pagina.redes.instagram ? 'checked' : ''} class="w-4 h-4 rounded text-brand" />
+            <i class="fa-brands fa-instagram text-pink-600"></i> Instagram
+          </label>
+          <label class="flex items-center gap-2 p-2.5 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-medium cursor-pointer">
+            <input type="checkbox" id="chk-red-tiktok" ${cfg.pie_pagina.redes.tiktok ? 'checked' : ''} class="w-4 h-4 rounded text-brand" />
+            <i class="fa-brands fa-tiktok text-slate-900 dark:text-white"></i> TikTok
+          </label>
+          <label class="flex items-center gap-2 p-2.5 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-medium cursor-pointer">
+            <input type="checkbox" id="chk-red-sitio-web" ${cfg.pie_pagina.redes.sitio_web ? 'checked' : ''} class="w-4 h-4 rounded text-brand" />
+            <i class="fa-solid fa-globe text-brand"></i> Sitio Web
           </label>
         </div>
-      </div>
-    `;
-    card.appendChild(configBar);
 
-    // 3. Panel de Variables Disponibles (Acordeón Cheatsheet)
-    const varsPanel = document.createElement('details');
-    varsPanel.className =
-      'group rounded-xl border border-slate-200/80 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/40 p-4 transition-all duration-150';
-    varsPanel.innerHTML = `
-      <summary class="flex items-center justify-between cursor-pointer list-none select-none text-xs font-semibold text-slate-800 dark:text-slate-200">
-        <span class="flex items-center gap-2">
-          <i class="fa-solid fa-code text-brand"></i>
-          Mapeo de Variables Disponibles en el Diseñador (Haga clic sobre una variable para copiar)
-        </span>
-        <span class="text-slate-400 group-open:rotate-180 transition-transform duration-200">
-          <i class="fa-solid fa-chevron-down text-xs"></i>
-        </span>
-      </summary>
-      <div class="mt-4 pt-3 border-t border-slate-200/60 dark:border-slate-800 space-y-3 text-xs">
-        <div>
-          <span class="font-semibold text-slate-700 dark:text-slate-300 block mb-1">
-            <i class="fa-regular fa-building mr-1 text-slate-400"></i> Datos Institucionales:
-          </span>
-          <div class="flex flex-wrap gap-1.5" data-vars-group="institucional">
-            <button type="button" class="var-badge" data-var="{{empresa_logo}}">{{empresa_logo}}</button>
-            <button type="button" class="var-badge" data-var="{{empresa_redes}}">{{empresa_redes}}</button>
-            <button type="button" class="var-badge" data-var="{{empresa_web}}">{{empresa_web}}</button>
-            <button type="button" class="var-badge" data-var="{{empresa_telefono}}">{{empresa_telefono}}</button>
-            <button type="button" class="var-badge" data-var="{{empresa_locacion}}">{{empresa_locacion}}</button>
-          </div>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <label class="flex items-center gap-2 p-2.5 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-medium cursor-pointer">
+            <input type="checkbox" id="chk-contacto-telefonos" ${cfg.pie_pagina.contacto.incluir_telefonos ? 'checked' : ''} class="w-4 h-4 rounded text-brand" />
+            <span>Incluir teléfonos / WhatsApp oficiales (+595 981 654321)</span>
+          </label>
+          <label class="flex items-center gap-2 p-2.5 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-medium cursor-pointer">
+            <input type="checkbox" id="chk-contacto-direccion" ${cfg.pie_pagina.contacto.incluir_direccion ? 'checked' : ''} class="w-4 h-4 rounded text-brand" />
+            <span>Incluir dirección física / ciudad (Pdte Franco, Paraguay)</span>
+          </label>
         </div>
 
         <div>
-          <span class="font-semibold text-slate-700 dark:text-slate-300 block mb-1">
-            <i class="fa-regular fa-user mr-1 text-slate-400"></i> Cabecera y Cliente:
-          </span>
-          <div class="flex flex-wrap gap-1.5" data-vars-group="cabecera">
-            <button type="button" class="var-badge" data-var="{{cliente_nombre}}">{{cliente_nombre}}</button>
-            <button type="button" class="var-badge" data-var="{{cliente_ruc}}">{{cliente_ruc}}</button>
-            <button type="button" class="var-badge" data-var="{{cliente_telefono}}">{{cliente_telefono}}</button>
-            <button type="button" class="var-badge" data-var="{{fecha_emision}}">{{fecha_emision}}</button>
-            <button type="button" class="var-badge" data-var="{{validez_dias}}">{{validez_dias}}</button>
-            <button type="button" class="var-badge" data-var="{{validez_fecha}}">{{validez_fecha}}</button>
-            <button type="button" class="var-badge" data-var="{{numero_presupuesto}}">{{numero_presupuesto}}</button>
-          </div>
-        </div>
-
-        <div>
-          <span class="font-semibold text-slate-700 dark:text-slate-300 block mb-1">
-            <i class="fa-solid fa-table-list mr-1 text-slate-400"></i> Tabla de Artículos:
-          </span>
-          <div class="flex flex-wrap gap-1.5" data-vars-group="tabla">
-            <button type="button" class="var-badge" data-var="{{articulos_tabla}}">{{articulos_tabla}} (Tabla Completa)</button>
-            <button type="button" class="var-badge" data-var="{{item_descripcion}}">{{item_descripcion}}</button>
-            <button type="button" class="var-badge" data-var="{{item_precio_unitario}}">{{item_precio_unitario}}</button>
-            <button type="button" class="var-badge" data-var="{{item_cantidad}}">{{item_cantidad}}</button>
-            <button type="button" class="var-badge" data-var="{{item_total}}">{{item_total}}</button>
-          </div>
-        </div>
-
-        <div>
-          <span class="font-semibold text-slate-700 dark:text-slate-300 block mb-1">
-            <i class="fa-solid fa-calculator mr-1 text-slate-400"></i> Descuentos y Totales:
-          </span>
-          <div class="flex flex-wrap gap-1.5" data-vars-group="totales">
-            <button type="button" class="var-badge" data-var="{{subtotal}}">{{subtotal}}</button>
-            <button type="button" class="var-badge" data-var="{{porcentaje_descuento}}">{{porcentaje_descuento}}</button>
-            <button type="button" class="var-badge" data-var="{{monto_descuento}}">{{monto_descuento}}</button>
-            <button type="button" class="var-badge" data-var="{{total_final}}">{{total_final}}</button>
-          </div>
-        </div>
-
-        <div>
-          <span class="font-semibold text-slate-700 dark:text-slate-300 block mb-1">
-            <i class="fa-regular fa-file-lines mr-1 text-slate-400"></i> Bloque de Términos y Hoja de Fotos:
-          </span>
-          <div class="flex flex-wrap gap-1.5" data-vars-group="otros">
-            <button type="button" class="var-badge" data-var="{{terminos_condiciones}}">{{terminos_condiciones}}</button>
-            <button type="button" class="var-badge" data-var="{{foto_producto_1}}">{{foto_producto_1}}</button>
-            <button type="button" class="var-badge" data-var="{{foto_producto_2}}">{{foto_producto_2}}</button>
-            <button type="button" class="var-badge" data-var="{{foto_producto_3}}">{{foto_producto_3}}</button>
-            <button type="button" class="var-badge" data-var="{{foto_producto_4}}">{{foto_producto_4}}</button>
-            <button type="button" class="var-badge" data-var="{{foto_producto_5}}">{{foto_producto_5}}</button>
-          </div>
+          <label class="text-[11px] font-semibold text-slate-600 dark:text-slate-400 block mb-1">Mensaje de Cierre:</label>
+          <input type="text" id="input-mensaje-cierre" value="${escapeHtml(cfg.pie_pagina.mensaje_cierre)}" class="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 font-semibold" />
         </div>
       </div>
     `;
+    controlsCol.appendChild(cardPiePagina);
 
-    // Eventos de copiado rápido al hacer clic en un badge de variable
-    varsPanel.querySelectorAll('.var-badge').forEach((btn) => {
-      btn.className =
-        'inline-flex items-center px-2 py-1 rounded-md text-[11px] font-mono font-medium bg-slate-200/80 dark:bg-slate-800 text-brand dark:text-brand-hover hover:bg-brand-soft dark:hover:bg-brand/20 transition-colors border border-slate-300/60 dark:border-slate-700/60';
-      btn.addEventListener('click', () => {
-        const text = btn.getAttribute('data-var');
-        if (navigator.clipboard) {
-          navigator.clipboard.writeText(text).then(() => {
-            toast.success(`Copiado: ${text}`);
-          });
-        }
-      });
+    // Barra de Guardar inferior
+    const bottomBar = document.createElement('div');
+    bottomBar.className = 'sticky bottom-0 p-3 bg-white/95 dark:bg-slate-900/95 backdrop-blur-xs border-t border-slate-200 dark:border-slate-800 rounded-xl flex items-center justify-between shadow-lg';
+    bottomBar.innerHTML = `
+      <span class="text-xs text-slate-500"><i class="fa-solid fa-cloud-arrow-up text-brand mr-1"></i> Cambios listos para guardar</span>
+      <div id="bottom-save-container"></div>
+    `;
+    const bottomSaveBtn = createButton({
+      text: 'Guardar configuración de presupuestos',
+      icon: 'fa-solid fa-floppy-disk',
+      variant: 'primary',
+      size: 'md',
+      onClick: () => handleGuardarConfig(),
     });
+    bottomBar.querySelector('#bottom-save-container').appendChild(bottomSaveBtn);
+    controlsCol.appendChild(bottomBar);
 
-    card.appendChild(varsPanel);
-
-    // 4. Bloque de Términos y Condiciones editable
-    const termsBlock = document.createElement('details');
-    termsBlock.className =
-      'group rounded-xl border border-slate-200/80 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/40 p-4 transition-all duration-150';
-    termsBlock.innerHTML = `
-      <summary class="flex items-center justify-between cursor-pointer list-none select-none text-xs font-semibold text-slate-800 dark:text-slate-200">
-        <span class="flex items-center gap-2">
-          <i class="fa-solid fa-list-check text-brand"></i>
-          Cláusulas de Términos y Condiciones Operativas (Texto precargado en {{terminos_condiciones}})
-        </span>
-        <span class="text-slate-400 group-open:rotate-180 transition-transform duration-200">
-          <i class="fa-solid fa-chevron-down text-xs"></i>
-        </span>
-      </summary>
-      <div class="mt-3 pt-3 border-t border-slate-200/60 dark:border-slate-800 space-y-2">
-        <p class="text-[11px] text-slate-500 dark:text-slate-400">
-          Estas cláusulas se insertan automáticamente en el bloque inferior del presupuesto oficial:
-        </p>
-        <textarea id="budget-terms-input" rows="4" class="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 focus:outline-hidden focus:ring-2 focus:ring-brand font-sans leading-relaxed">1. Validez de la oferta: Este presupuesto tiene una validez de 15 días corridos a partir de su fecha de emisión.
-2. Condiciones de pago: El pedido se confirma con la entrega del 60%, por medio de efectivo o transferencia bancaria.
-3. Plazos de entrega: Tiempo estimado de 3 a 5 días hábiles posterior a la aprobación del diseño y confirmación de seña.
-4. Garantía y cambios: Tratándose de artículos personalizados, no se admiten cancelaciones una vez iniciada la producción.</textarea>
-      </div>
-    `;
-    card.appendChild(termsBlock);
-
-    // 5. Contenedor interactivo del Diseñador (@pdfme/ui)
-    const designerWrapper = document.createElement('div');
-    designerWrapper.className = 'w-full space-y-2';
-
-    const designerCanvas = document.createElement('div');
-    designerCanvas.id = 'pdfme-designer-holder';
-    designerCanvas.className =
-      'w-full h-[760px] min-h-[600px] rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-100 dark:bg-slate-950 overflow-hidden relative shadow-inner';
-
-    // Spinner de carga inicial
-    designerCanvas.innerHTML = `
-      <div class="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-white/80 dark:bg-slate-900/80 backdrop-blur-xs z-10" id="designer-loading-overlay">
-        <i class="fa-solid fa-circle-notch fa-spin text-3xl text-brand"></i>
-        <div class="text-center">
-          <p class="text-sm font-semibold text-slate-800 dark:text-slate-200">
-            Cargando Diseñador @pdfme...
-          </p>
-          <p class="text-xs text-slate-500 dark:text-slate-400">
-            Descargando plantilla base y módulos interactivos
-          </p>
-        </div>
-      </div>
-    `;
-
-    designerWrapper.appendChild(designerCanvas);
-    card.appendChild(designerWrapper);
-    parent.appendChild(card);
+    splitGrid.appendChild(controlsCol);
+    wrap.appendChild(splitGrid);
+    parent.appendChild(wrap);
 
     // =========================================================================
-    // Lógica de Inicialización de @pdfme/ui Designer
+    // RENDERIZADO DE LA VISTA PREVIA (A4 Oficial)
     // =========================================================================
-    let currentTemplate = null;
+    function updatePreview() {
+      pagesWrapper.innerHTML = '';
 
-    async function initDesigner() {
-      try {
-        const { Designer, plugins } = await loadPdfmeLibraries();
+      // Ancho base del preview en píxeles (equivalente visual proporcional A4 210mm x 297mm)
+      const baseA4W = 520;
+      const baseA4H = Math.round(baseA4W * 1.4142); // 735px
 
-        // 1. Obtener plantilla desde backend o fallback
-        const templateData = await apiFetch('/api/config/budget-template').catch(() => null);
-        currentTemplate = templateData || (await BudgetDocumentService.getDefaultBudgetTemplate());
+      // Escala de zoom aplicada
+      pagesWrapper.style.transform = `scale(${currentZoom})`;
 
-        // 2. Resolver basePdf
-        const resolvedBase = await resolveBasePdf(currentTemplate.basePdf);
-        const designerTemplate = {
-          ...currentTemplate,
-          basePdf: resolvedBase,
-        };
+      // 1. PÁGINA 1: PORTADA
+      if (activePageFilter === 'todas' || activePageFilter === 'portada') {
+        const p1 = document.createElement('div');
+        p1.id = 'page-preview-1';
+        p1.className = 'relative rounded-lg shadow-md overflow-hidden shrink-0 flex items-center justify-center transition-all duration-150';
+        p1.style.width = `${baseA4W}px`;
+        p1.style.height = `${baseA4H}px`;
+        p1.style.backgroundColor = cfg.caratula.estilo_color;
 
-        // 3. Limpiar contenedor
-        designerCanvas.innerHTML = '';
+        const logoScalePx = Math.round((cfg.caratula.logo_ancho / 210) * baseA4W);
+        p1.innerHTML = `
+          <img src="/logo/R1.png" alt="R1 Personalizados" class="transition-all" style="width: ${logoScalePx}px; max-width: 90%;" />
+        `;
+        pagesWrapper.appendChild(p1);
+      }
 
-        // 4. Instanciar @pdfme Designer
-        activeBudgetDesigner = new Designer({
-          domContainer: designerCanvas,
-          template: designerTemplate,
-          plugins,
-        });
+      // 2. PÁGINA 2: CONTENIDO
+      if (activePageFilter === 'todas' || activePageFilter === 'contenido') {
+        const p2 = document.createElement('div');
+        p2.id = 'page-preview-2';
+        p2.className = 'relative rounded-lg shadow-md overflow-hidden shrink-0 bg-white text-slate-900 transition-all duration-150 flex flex-col';
+        p2.style.width = `${baseA4W}px`;
+        p2.style.height = `${baseA4H}px`;
+        p2.style.padding = '24px 28px 30px 28px';
 
-        // 5. Sincronizar selectores de tamaño y orientación
-        const selectSize = card.querySelector('#budget-page-size');
-        const selectOrient = card.querySelector('#budget-orientation');
-        if (currentTemplate.pageSize && selectSize) {
-          selectSize.value = currentTemplate.pageSize;
+        const scale = (cfg.pagina2.tamano_textos_porcentaje / 100);
+        const gap = cfg.pagina2.separacion_bloques_px;
+        const logoH = Math.round((cfg.pagina2.cabecera_logo_alto / 297) * baseA4H);
+
+        const desc = cfg.pagina2.descuento;
+        const terminosCfg = cfg.pagina2.terminos || {};
+        const terminosPosPx = Number(terminosCfg.posicion_vertical_px ?? 20);
+
+        // Auto-shrink si hay muchos productos para garantizar que NUNCA pase de página
+        const itemsCount = sampleBudget.items.length;
+        let autoShrinkFactor = 1;
+        if (itemsCount > 4) {
+          autoShrinkFactor = Math.max(0.65, 1 - (itemsCount - 4) * 0.045);
         }
-        if (currentTemplate.orientation && selectOrient) {
-          selectOrient.value = currentTemplate.orientation;
+        const effectiveTermsScale = scale * autoShrinkFactor;
+        const effectiveMarginPx = Math.max(0, Math.min(130, Math.round(terminosPosPx * autoShrinkFactor)));
+
+        const tituloHtml = terminosCfg.titulo_html || `<strong>${escapeHtml(terminosCfg.titulo || 'TÉRMINOS Y CONDICIONES')}</strong>`;
+        let clausulasHtml = terminosCfg.clausulas_html;
+        if (!clausulasHtml) {
+          const list = Array.isArray(terminosCfg.clausulas) ? terminosCfg.clausulas : [];
+          clausulasHtml = `<ol class="list-decimal pl-4 space-y-0.5">${list.map(t => `<li>${escapeHtml(t)}</li>`).join('')}</ol>`;
         }
 
-        toast.info('Diseñador cargado exitosamente');
-      } catch (err) {
-        console.error('Error al inicializar diseñador @pdfme:', err);
-        designerCanvas.innerHTML = `
-          <div class="p-8 text-center text-slate-500 dark:text-slate-400 space-y-3">
-            <i class="fa-solid fa-triangle-exclamation text-3xl text-amber-500"></i>
-            <p class="text-sm font-semibold text-slate-800 dark:text-slate-200">
-              No se pudo inicializar el Diseñador interactivo
-            </p>
-            <p class="text-xs max-w-md mx-auto">
-              ${escapeHtml(err.message || 'Verifique la conexión a internet para descargar las librerías de @pdfme')}
-            </p>
-            <div class="pt-2">
-              <button type="button" id="btn-reintentar-designer" class="px-4 py-2 rounded-lg bg-brand text-white text-xs font-semibold hover:bg-brand-hover">
-                Reintentar
-              </button>
+        p2.innerHTML = `
+          <!-- Logo Superior -->
+          <div class="text-center mb-1 shrink-0" style="${cfg.pagina2.cabecera_logo_visible ? '' : 'display: none;'}">
+            <img src="/logo/R1.png" alt="R1" class="mx-auto" style="height: ${logoH}px;" />
+          </div>
+
+          <!-- Barra Oficial -->
+          <div class="text-white text-center font-black tracking-widest uppercase rounded-sm py-1 shrink-0" style="background-color: ${cfg.caratula.estilo_color}; font-size: ${11 * scale}px; margin-bottom: ${gap * 0.75}px; ${cfg.pagina2.titulo_barra_visible ? '' : 'display: none;'}">
+            ${escapeHtml(cfg.pagina2.titulo_barra_texto)}
+          </div>
+
+          <!-- Meta Box Cliente -->
+          <div class="grid grid-cols-2 gap-x-4 gap-y-0.5 p-2 rounded-md border border-slate-300 bg-slate-50 shrink-0 text-slate-800" style="font-size: ${9.5 * scale}px; margin-bottom: ${gap * 0.75}px;">
+            <div><span class="font-bold text-slate-600">CLIENTE:</span> ${escapeHtml(sampleBudget.cliente.nombre)}</div>
+            <div><span class="font-bold text-slate-600">FECHA:</span> ${sampleBudget.fecha_emision}</div>
+            <div><span class="font-bold text-slate-600">RUC / CI:</span> ${sampleBudget.cliente.ruc}</div>
+            <div><span class="font-bold text-slate-600">TELÉFONO:</span> ${sampleBudget.cliente.telefono}</div>
+            <div><span class="font-bold text-slate-600">VALIDEZ HASTA:</span> ${sampleBudget.validez_fecha}</div>
+            <div><span class="font-bold text-slate-600">N° PRESUPUESTO:</span> ${sampleBudget.numero_presupuesto}</div>
+          </div>
+
+          <!-- Tabla de Artículos -->
+          <table class="w-full border-collapse shrink-0" style="font-size: ${10 * scale}px; margin-bottom: ${gap * 0.75}px;">
+            <thead>
+              <tr class="bg-slate-100 border-b-2 border-slate-300 text-slate-600 text-[9px] font-bold">
+                <th class="py-1 px-1.5 text-left">DESCRIPCIÓN</th>
+                <th class="py-1 px-1.5 text-right">PRECIO UNITARIO</th>
+                <th class="py-1 px-1.5 text-center">CANT.</th>
+                <th class="py-1 px-1.5 text-right">TOTAL</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${sampleBudget.items.map(it => `
+                <tr class="border-b border-slate-200">
+                  <td class="py-1 px-1.5 flex items-center gap-1.5">
+                    <img src="${it.imagen_url}" class="w-4 h-4 rounded-xs object-cover" style="${cfg.pagina2.foto_producto_descripcion ? '' : 'display: none;'}" />
+                    <span>${escapeHtml(it.descripcion)}</span>
+                  </td>
+                  <td class="py-1 px-1.5 text-right font-mono">${it.precio_unitario_formateado}</td>
+                  <td class="py-1 px-1.5 text-center">${it.cantidad}</td>
+                  <td class="py-1 px-1.5 text-right font-mono font-bold">${it.total_formateado}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+
+          <!-- Cuadro de Descuento -->
+          <div class="py-1 px-2.5 text-center font-bold rounded-md shrink-0 transition-all" style="font-size: ${10 * scale}px; margin-bottom: ${gap * 0.75}px; background-color: ${desc.color_fondo}; color: ${desc.color_texto}; border: ${desc.mostrar_cuadro_borde ? `1px solid ${desc.color_borde}` : 'none'}; ${desc.visible ? '' : 'display: none;'}">
+            ${escapeHtml(desc.texto)}
+          </div>
+
+          <!-- Totales -->
+          <div class="flex justify-end shrink-0" style="margin-bottom: ${gap * 0.75}px;">
+            <div class="w-52 space-y-0.5" style="font-size: ${10 * scale}px;">
+              <div class="flex justify-between text-slate-600">
+                <span>Subtotal:</span>
+                <span class="font-mono">${sampleBudget.totales.subtotal_formateado}</span>
+              </div>
+              <div class="flex justify-between text-rose-600">
+                <span>Descuento (${sampleBudget.totales.porcentaje_descuento}%):</span>
+                <span class="font-mono">${sampleBudget.totales.monto_descuento_formateado}</span>
+              </div>
+              <div class="flex justify-between text-white font-bold p-1 rounded-sm" style="background-color: ${cfg.caratula.estilo_color}; font-size: ${11 * scale}px;">
+                <span>TOTAL CON DESC.:</span>
+                <span class="font-mono">${sampleBudget.totales.total_final_formateado}</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Términos y Condiciones -->
+          <div class="border-t border-slate-200 pt-1.5 text-slate-600 transition-all" style="margin-top: ${effectiveMarginPx}px; font-size: ${7.5 * effectiveTermsScale}px; margin-bottom: 22px; max-height: calc(100% - 25px); overflow: hidden;">
+            <div class="font-bold text-slate-800 uppercase mb-0.5" style="font-size: ${8.5 * effectiveTermsScale}px;">${tituloHtml}</div>
+            <div class="terms-preview-body leading-tight">${clausulasHtml}</div>
+          </div>
+
+          <!-- Pie de Página -->
+          <div class="absolute bottom-0 left-0 right-0 py-1.5 px-4 text-center text-white" style="background-color: ${cfg.caratula.estilo_color}; font-size: 7.5px; line-height: 1.3;">
+            <div class="font-bold">${escapeHtml(cfg.pie_pagina.mensaje_cierre)}</div>
+            <div>
+              ${cfg.pie_pagina.redes.instagram ? 'instagram.com/r1personalizados • ' : ''}
+              ${cfg.pie_pagina.redes.facebook ? 'facebook.com/r1personalizados • ' : ''}
+              ${cfg.pie_pagina.redes.tiktok ? 'tiktok.com/@r1personalizados • ' : ''}
+              ${cfg.pie_pagina.redes.sitio_web ? 'netz.com.py' : ''}
+            </div>
+            <div>
+              ${cfg.pie_pagina.contacto.incluir_telefonos ? '+595 981 654321 • ' : ''}
+              ${cfg.pie_pagina.contacto.incluir_direccion ? 'Pdte Franco, Paraguay' : ''}
             </div>
           </div>
         `;
-        const retryBtn = designerCanvas.querySelector('#btn-reintentar-designer');
-        if (retryBtn) retryBtn.addEventListener('click', () => initDesigner());
+        pagesWrapper.appendChild(p2);
+      }
+
+      // 3. PÁGINA 3: FOTOS DE PRODUCTOS
+      if ((activePageFilter === 'todas' || activePageFilter === 'fotos') && cfg.pagina3.visible) {
+        const p3 = document.createElement('div');
+        p3.id = 'page-preview-3';
+        p3.className = 'relative rounded-lg shadow-md overflow-hidden shrink-0 bg-white text-slate-900 transition-all duration-150 flex flex-col';
+        p3.style.width = `${baseA4W}px`;
+        p3.style.height = `${baseA4H}px`;
+        p3.style.padding = '24px 28px 30px 28px';
+
+        const cols = cfg.pagina3.columnas_por_fila || 2;
+        const fotoH = Math.round((cfg.pagina3.altura_foto_mm / 297) * baseA4H);
+        const gap = cfg.pagina3.separacion_fotos_px;
+        const posV = cfg.pagina3.posicion_vertical_px;
+        const posH = cfg.pagina3.posicion_horizontal_px;
+
+        p3.innerHTML = `
+          <!-- Barra Superior Fotos -->
+          <div class="text-white text-center font-black tracking-widest uppercase rounded-sm py-1 shrink-0" style="background-color: ${cfg.caratula.estilo_color}; font-size: 11px; margin-bottom: 12px; ${cfg.pagina3.titulo_visible ? '' : 'display: none;'}">
+            ${escapeHtml(cfg.pagina3.titulo)}
+          </div>
+
+          <!-- Grilla de Fotos -->
+          <div class="grid w-full" style="grid-template-columns: repeat(${cols}, 1fr); gap: ${gap}px; margin-top: ${posV}px; margin-left: ${posH}px;">
+            ${sampleBudget.imagenes_productos.map(img => `
+              <div class="bg-white border border-slate-200 rounded-md p-1.5 text-center shadow-2xs">
+                <img src="${img.url}" class="w-full rounded-xs" style="height: ${fotoH}px; object-fit: ${cfg.pagina3.ajuste_foto};" />
+                <div class="text-[9.5px] font-semibold text-slate-700 mt-1" style="${cfg.pagina3.mostrar_nombre_producto ? '' : 'display: none;'}">${escapeHtml(img.nombre)}</div>
+              </div>
+            `).join('')}
+          </div>
+
+          <!-- Pie de Página -->
+          <div class="absolute bottom-0 left-0 right-0 py-1.5 px-4 text-center text-white" style="background-color: ${cfg.caratula.estilo_color}; font-size: 7.5px; line-height: 1.3;">
+            <div class="font-bold">${escapeHtml(cfg.pie_pagina.mensaje_cierre)}</div>
+            <div>
+              ${cfg.pie_pagina.redes.instagram ? 'instagram.com/r1personalizados • ' : ''}
+              ${cfg.pie_pagina.redes.facebook ? 'facebook.com/r1personalizados • ' : ''}
+              ${cfg.pie_pagina.redes.tiktok ? 'tiktok.com/@r1personalizados • ' : ''}
+              ${cfg.pie_pagina.redes.sitio_web ? 'netz.com.py' : ''}
+            </div>
+            <div>
+              ${cfg.pie_pagina.contacto.incluir_telefonos ? '+595 981 654321 • ' : ''}
+              ${cfg.pie_pagina.contacto.incluir_direccion ? 'Pdte Franco, Paraguay' : ''}
+            </div>
+          </div>
+        `;
+        pagesWrapper.appendChild(p3);
       }
     }
 
-    // Iniciar carga del diseñador
-    initDesigner();
-
     // =========================================================================
-    // Handlers de Acciones (Guardar, Previsualizar, Restablecer)
+    // VINCULACIÓN DE CONTROLES (Event Listeners de Tiempo Real)
     // =========================================================================
 
-    async function handleGuardarTemplate() {
-      if (!activeBudgetDesigner) {
-        toast.error('El diseñador aún no está activo');
-        return;
+    // Zoom selector
+    const zoomSelect = previewCard.querySelector('#preview-zoom-select');
+    zoomSelect.addEventListener('change', () => {
+      if (zoomSelect.value === 'fit') {
+        const availableW = previewViewport.clientWidth - 48;
+        currentZoom = Math.min(1, Math.max(0.4, availableW / 520));
+      } else {
+        currentZoom = parseFloat(zoomSelect.value) || 1;
       }
-      btnGuardar.disabled = true;
+      updatePreview();
+    });
+
+    // Page filter buttons
+    const filterBtns = previewCard.querySelectorAll('#page-filter-btns button');
+    filterBtns.forEach(btn => {
+      btn.addEventListener('click', () => {
+        filterBtns.forEach(b => {
+          b.className = 'px-2.5 py-1 rounded-md text-[11px] font-semibold text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition';
+        });
+        btn.className = 'px-2.5 py-1 rounded-md text-[11px] font-semibold transition bg-brand text-white';
+        activePageFilter = btn.dataset.filter;
+        updatePreview();
+      });
+    });
+
+    // 1. Carátula Logo Slider & Quick Buttons
+    const sliderCaratulaLogo = cardCaratulaLogo.querySelector('#slider-caratula-logo');
+    const badgeCaratulaLogo = cardCaratulaLogo.querySelector('#badge-caratula-logo-val');
+    const miniCoverThumb = cardCaratulaLogo.querySelector('#mini-cover-thumb');
+    const miniCoverLogo = cardCaratulaLogo.querySelector('#mini-cover-logo');
+
+    function syncCaratulaLogo(val) {
+      cfg.caratula.logo_ancho = parseInt(val, 10);
+      sliderCaratulaLogo.value = val;
+      badgeCaratulaLogo.textContent = `${val} mm`;
+      miniCoverLogo.style.width = `${val * 0.45}px`;
+      updatePreview();
+    }
+    sliderCaratulaLogo.addEventListener('input', (e) => syncCaratulaLogo(e.target.value));
+
+    // 2. Textos P2
+    const sliderTextosP2 = cardTextosP2.querySelector('#slider-textos-p2');
+    const badgeTextosP2 = cardTextosP2.querySelector('#badge-textos-p2-val');
+    function syncTextosP2(val) {
+      cfg.pagina2.tamano_textos_porcentaje = parseInt(val, 10);
+      sliderTextosP2.value = val;
+      badgeTextosP2.textContent = `${val}% • ${val >= 100 ? 'Normal' : val >= 90 ? 'Mediano' : val >= 80 ? 'Compacto' : 'Reducido'}`;
+      updatePreview();
+    }
+    sliderTextosP2.addEventListener('input', (e) => syncTextosP2(e.target.value));
+
+    // 3. Separación Bloques
+    const sliderSeparacion = cardSeparacion.querySelector('#slider-separacion');
+    const badgeSeparacion = cardSeparacion.querySelector('#badge-separacion-val');
+    function syncSeparacion(val) {
+      cfg.pagina2.separacion_bloques_px = parseInt(val, 10);
+      sliderSeparacion.value = val;
+      badgeSeparacion.textContent = `${val} px • ${val <= 12 ? 'Apretado' : val <= 20 ? 'Estándar' : val <= 30 ? 'Amplio' : 'Extendido'}`;
+      updatePreview();
+    }
+    sliderSeparacion.addEventListener('input', (e) => syncSeparacion(e.target.value));
+
+    // 4. Color Temático
+    const pickerColor = cardColor.querySelector('#picker-estilo-color');
+    const inputColorHex = cardColor.querySelector('#input-estilo-color-hex');
+    function syncColor(val) {
+      cfg.caratula.estilo_color = val;
+      pickerColor.value = val;
+      inputColorHex.value = val.toUpperCase();
+      miniCoverThumb.style.backgroundColor = val;
+      updatePreview();
+    }
+    pickerColor.addEventListener('input', (e) => syncColor(e.target.value));
+    inputColorHex.addEventListener('change', (e) => {
+      let val = e.target.value.trim();
+      if (!val.startsWith('#')) val = '#' + val;
+      if (/^#[0-9A-F]{6}$/i.test(val)) syncColor(val);
+    });
+    cardColor.querySelectorAll('.btn-color-preset').forEach(btn => {
+      btn.addEventListener('click', () => syncColor(btn.dataset.color));
+    });
+
+    // 5. Logo Cabecera P2
+    const chkLogoP2 = cardLogoCabecera.querySelector('#chk-logo-p2-visible');
+    const sliderLogoP2 = cardLogoCabecera.querySelector('#slider-logo-p2');
+    const badgeLogoP2 = cardLogoCabecera.querySelector('#badge-logo-p2-val');
+    chkLogoP2.addEventListener('change', () => {
+      cfg.pagina2.cabecera_logo_visible = chkLogoP2.checked;
+      updatePreview();
+    });
+    function syncLogoP2(val) {
+      cfg.pagina2.cabecera_logo_alto = parseInt(val, 10);
+      sliderLogoP2.value = val;
+      badgeLogoP2.textContent = `${val} mm • ${val <= 16 ? 'Mini' : val <= 22 ? 'Compacto' : val <= 28 ? 'Estándar' : val <= 38 ? 'Mediano' : 'Grande'}`;
+      updatePreview();
+    }
+    sliderLogoP2.addEventListener('input', (e) => syncLogoP2(e.target.value));
+
+    // 6. Título Barra Oficial
+    const chkTituloBarra = cardTituloBarra.querySelector('#chk-titulo-barra-visible');
+    const inputTituloBarra = cardTituloBarra.querySelector('#input-titulo-barra');
+    chkTituloBarra.addEventListener('change', () => {
+      cfg.pagina2.titulo_barra_visible = chkTituloBarra.checked;
+      updatePreview();
+    });
+    inputTituloBarra.addEventListener('input', (e) => {
+      cfg.pagina2.titulo_barra_texto = e.target.value;
+      updatePreview();
+    });
+    cardTituloBarra.querySelector('#btn-def-titulo-barra').addEventListener('click', () => {
+      inputTituloBarra.value = 'PRESUPUESTO OFICIAL';
+      cfg.pagina2.titulo_barra_texto = 'PRESUPUESTO OFICIAL';
+      updatePreview();
+    });
+
+    // 7. Foto en Descripción
+    const chkFotoDesc = cardFotoDescripcion.querySelector('#chk-foto-desc-visible');
+    chkFotoDesc.addEventListener('change', () => {
+      cfg.pagina2.foto_producto_descripcion = chkFotoDesc.checked;
+      updatePreview();
+    });
+
+    // 8. Descuento / Promoción
+    const chkDescVis = cardDescuento.querySelector('#chk-descuento-visible');
+    const chkDescBorde = cardDescuento.querySelector('#chk-descuento-borde');
+    const inputDescTxt = cardDescuento.querySelector('#input-descuento-texto');
+    const pickerDescBg = cardDescuento.querySelector('#picker-desc-bg');
+    const pickerDescTxt = cardDescuento.querySelector('#picker-desc-text');
+    const pickerDescBorder = cardDescuento.querySelector('#picker-desc-border');
+    const inputDescBgHex = cardDescuento.querySelector('#input-desc-bg-hex');
+    const inputDescTxtHex = cardDescuento.querySelector('#input-desc-text-hex');
+    const inputDescBorderHex = cardDescuento.querySelector('#input-desc-border-hex');
+    const descLivePreviewBox = cardDescuento.querySelector('#desc-live-preview-box');
+
+    function syncDescuentoUI() {
+      descLivePreviewBox.style.backgroundColor = cfg.pagina2.descuento.color_fondo;
+      descLivePreviewBox.style.color = cfg.pagina2.descuento.color_texto;
+      descLivePreviewBox.style.border = cfg.pagina2.descuento.mostrar_cuadro_borde ? `1px solid ${cfg.pagina2.descuento.color_borde}` : 'none';
+      descLivePreviewBox.textContent = cfg.pagina2.descuento.texto;
+      updatePreview();
+    }
+
+    chkDescVis.addEventListener('change', () => {
+      cfg.pagina2.descuento.visible = chkDescVis.checked;
+      updatePreview();
+    });
+    chkDescBorde.addEventListener('change', () => {
+      cfg.pagina2.descuento.mostrar_cuadro_borde = chkDescBorde.checked;
+      syncDescuentoUI();
+    });
+    inputDescTxt.addEventListener('input', (e) => {
+      cfg.pagina2.descuento.texto = e.target.value;
+      syncDescuentoUI();
+    });
+    cardDescuento.querySelector('#btn-def-descuento-texto').addEventListener('click', () => {
+      inputDescTxt.value = '¡10% DE DESCUENTO POR PAGO AL CONTADO!';
+      cfg.pagina2.descuento.texto = '¡10% DE DESCUENTO POR PAGO AL CONTADO!';
+      syncDescuentoUI();
+    });
+
+    pickerDescBg.addEventListener('input', (e) => {
+      cfg.pagina2.descuento.color_fondo = e.target.value;
+      inputDescBgHex.value = e.target.value.toUpperCase();
+      syncDescuentoUI();
+    });
+    pickerDescTxt.addEventListener('input', (e) => {
+      cfg.pagina2.descuento.color_texto = e.target.value;
+      inputDescTxtHex.value = e.target.value.toUpperCase();
+      syncDescuentoUI();
+    });
+    pickerDescBorder.addEventListener('input', (e) => {
+      cfg.pagina2.descuento.color_borde = e.target.value;
+      inputDescBorderHex.value = e.target.value.toUpperCase();
+      syncDescuentoUI();
+    });
+
+    cardDescuento.querySelectorAll('.btn-desc-preset').forEach(btn => {
+      btn.addEventListener('click', () => {
+        cfg.pagina2.descuento.color_fondo = btn.dataset.bg;
+        cfg.pagina2.descuento.color_texto = btn.dataset.text;
+        cfg.pagina2.descuento.color_borde = btn.dataset.border;
+        pickerDescBg.value = btn.dataset.bg;
+        pickerDescTxt.value = btn.dataset.text;
+        pickerDescBorder.value = btn.dataset.border;
+        inputDescBgHex.value = btn.dataset.bg.toUpperCase();
+        inputDescTxtHex.value = btn.dataset.text.toUpperCase();
+        inputDescBorderHex.value = btn.dataset.border.toUpperCase();
+        syncDescuentoUI();
+      });
+    });
+
+    // 9. Términos y Condiciones
+    const sliderTerminosPos = cardTerminos.querySelector('#slider-terminos-pos');
+    const badgeTerminosPos = cardTerminos.querySelector('#badge-terminos-pos-val');
+
+    sliderTerminosPos.addEventListener('input', (e) => {
+      const val = parseInt(e.target.value, 10);
+      cfg.pagina2.terminos.posicion_vertical_px = val;
+      badgeTerminosPos.textContent = `${val} px`;
+      updatePreview();
+    });
+
+    const defaultClausesHtml = '<ol class="list-decimal pl-4 space-y-1"><li><strong>Validez de la oferta:</strong> Este presupuesto tiene una validez de 15 días corridos a partir de su fecha de emisión.</li><li><strong>Condiciones de pago:</strong> El pedido se confirma con la entrega del 60%, por medio de efectivo o transferencia bancaria.</li><li><strong>Plazos de entrega:</strong> Tiempo estimado de 3 a 5 días hábiles posterior a la aprobación del diseño y confirmación de seña.</li><li><strong>Garantía y cambios:</strong> Tratándose de artículos personalizados, no se admiten cancelaciones una vez iniciada la producción.</li></ol>';
+
+    const initialTitleHtml = cfg.pagina2.terminos.titulo_html || `<strong>${escapeHtml(cfg.pagina2.terminos.titulo || 'TÉRMINOS Y CONDICIONES')}</strong>`;
+    const initialClausesHtml = cfg.pagina2.terminos.clausulas_html || (Array.isArray(cfg.pagina2.terminos.clausulas) && cfg.pagina2.terminos.clausulas.length ? `<ol class="list-decimal pl-4 space-y-1">${cfg.pagina2.terminos.clausulas.map(c => `<li>${escapeHtml(c)}</li>`).join('')}</ol>` : defaultClausesHtml);
+
+    const editorTitulo = createRichEditor({
+      container: cardTerminos.querySelector('#container-rich-editor-titulo'),
+      initialHtml: initialTitleHtml,
+      placeholder: 'Título de términos...',
+      showLists: false,
+      minHeight: '38px',
+      onUpdate: (html) => {
+        cfg.pagina2.terminos.titulo_html = html;
+        updatePreview();
+      },
+    });
+
+    const editorClausulas = createRichEditor({
+      container: cardTerminos.querySelector('#container-rich-editor-clausulas'),
+      initialHtml: initialClausesHtml,
+      placeholder: 'Redacte las cláusulas aquí...',
+      showLists: true,
+      minHeight: '110px',
+      onUpdate: (html) => {
+        cfg.pagina2.terminos.clausulas_html = html;
+        updatePreview();
+      },
+    });
+
+    cardTerminos.querySelector('#btn-def-terminos-titulo').addEventListener('click', () => {
+      const defTit = '<strong>TÉRMINOS Y CONDICIONES</strong>';
+      cfg.pagina2.terminos.titulo_html = defTit;
+      cfg.pagina2.terminos.titulo = 'TÉRMINOS Y CONDICIONES';
+      editorTitulo.setHtml(defTit);
+      updatePreview();
+    });
+
+    cardTerminos.querySelector('#btn-def-terminos-clausulas').addEventListener('click', () => {
+      cfg.pagina2.terminos.clausulas_html = defaultClausesHtml;
+      editorClausulas.setHtml(defaultClausesHtml);
+      updatePreview();
+    });
+
+    // 10. Página 3 Fotos
+    const chkP3Vis = cardPagina3.querySelector('#chk-p3-visible');
+    const chkP3TitVis = cardPagina3.querySelector('#chk-p3-titulo-visible');
+    const inputP3Tit = cardPagina3.querySelector('#input-p3-titulo');
+    const sliderP3PosV = cardPagina3.querySelector('#slider-p3-pos-v');
+    const sliderP3PosH = cardPagina3.querySelector('#slider-p3-pos-h');
+    const sliderP3Gap = cardPagina3.querySelector('#slider-p3-gap');
+    const sliderP3Altura = cardPagina3.querySelector('#slider-p3-altura');
+    const selectP3Ajuste = cardPagina3.querySelector('#select-p3-ajuste');
+    const selectP3Cols = cardPagina3.querySelector('#select-p3-columnas');
+    const chkP3Nombre = cardPagina3.querySelector('#chk-p3-mostrar-nombre');
+
+    chkP3Vis.addEventListener('change', () => {
+      cfg.pagina3.visible = chkP3Vis.checked;
+      updatePreview();
+    });
+    chkP3TitVis.addEventListener('change', () => {
+      cfg.pagina3.titulo_visible = chkP3TitVis.checked;
+      updatePreview();
+    });
+    inputP3Tit.addEventListener('input', (e) => {
+      cfg.pagina3.titulo = e.target.value;
+      updatePreview();
+    });
+    sliderP3PosV.addEventListener('input', (e) => {
+      cfg.pagina3.posicion_vertical_px = parseInt(e.target.value, 10);
+      cardPagina3.querySelector('#badge-p3-pos-v').textContent = `${e.target.value} px`;
+      updatePreview();
+    });
+    sliderP3PosH.addEventListener('input', (e) => {
+      cfg.pagina3.posicion_horizontal_px = parseInt(e.target.value, 10);
+      cardPagina3.querySelector('#badge-p3-pos-h').textContent = `${e.target.value} px`;
+      updatePreview();
+    });
+    sliderP3Gap.addEventListener('input', (e) => {
+      cfg.pagina3.separacion_fotos_px = parseInt(e.target.value, 10);
+      cardPagina3.querySelector('#badge-p3-gap').textContent = `${e.target.value} px`;
+      updatePreview();
+    });
+    sliderP3Altura.addEventListener('input', (e) => {
+      cfg.pagina3.altura_foto_mm = parseInt(e.target.value, 10);
+      cardPagina3.querySelector('#badge-p3-altura').textContent = `${e.target.value} mm`;
+      updatePreview();
+    });
+    selectP3Ajuste.addEventListener('change', () => {
+      cfg.pagina3.ajuste_foto = selectP3Ajuste.value;
+      updatePreview();
+    });
+    selectP3Cols.addEventListener('change', () => {
+      cfg.pagina3.columnas_por_fila = parseInt(selectP3Cols.value, 10) || 2;
+      updatePreview();
+    });
+    chkP3Nombre.addEventListener('change', () => {
+      cfg.pagina3.mostrar_nombre_producto = chkP3Nombre.checked;
+      updatePreview();
+    });
+
+    // 11. Pie de Página
+    const chkRedFb = cardPiePagina.querySelector('#chk-red-facebook');
+    const chkRedIg = cardPiePagina.querySelector('#chk-red-instagram');
+    const chkRedTk = cardPiePagina.querySelector('#chk-red-tiktok');
+    const chkRedWeb = cardPiePagina.querySelector('#chk-red-sitio-web');
+    const chkTel = cardPiePagina.querySelector('#chk-contacto-telefonos');
+    const chkDir = cardPiePagina.querySelector('#chk-contacto-direccion');
+    const inputCierre = cardPiePagina.querySelector('#input-mensaje-cierre');
+
+    chkRedFb.addEventListener('change', () => { cfg.pie_pagina.redes.facebook = chkRedFb.checked; updatePreview(); });
+    chkRedIg.addEventListener('change', () => { cfg.pie_pagina.redes.instagram = chkRedIg.checked; updatePreview(); });
+    chkRedTk.addEventListener('change', () => { cfg.pie_pagina.redes.tiktok = chkRedTk.checked; updatePreview(); });
+    chkRedWeb.addEventListener('change', () => { cfg.pie_pagina.redes.sitio_web = chkRedWeb.checked; updatePreview(); });
+    chkTel.addEventListener('change', () => { cfg.pie_pagina.contacto.incluir_telefonos = chkTel.checked; updatePreview(); });
+    chkDir.addEventListener('change', () => { cfg.pie_pagina.contacto.incluir_direccion = chkDir.checked; updatePreview(); });
+    inputCierre.addEventListener('input', (e) => { cfg.pie_pagina.mensaje_cierre = e.target.value; updatePreview(); });
+
+    // Botones rápidos genéricos en tarjetas (data-target & data-val)
+    controlsCol.querySelectorAll('.btn-quick-val').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const targetId = btn.dataset.target;
+        const val = btn.dataset.val;
+        const input = controlsCol.querySelector('#' + targetId);
+        if (input) {
+          input.value = val;
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+      });
+    });
+
+    // =========================================================================
+    // CARGA INICIAL DESDE LA API
+    // =========================================================================
+    async function loadConfigFromBackend() {
       try {
-        const updated = activeBudgetDesigner.getTemplate();
-        const termsInput = card.querySelector('#budget-terms-input');
-        const pageSize = card.querySelector('#budget-page-size')?.value || 'A4';
-        const orientation = card.querySelector('#budget-orientation')?.value || 'portrait';
+        const res = await apiFetch('/api/config/budget-template').catch(() => null);
+        if (res && res.caratula) {
+          cfg = res;
+          // Sincronizar inputs
+          syncCaratulaLogo(cfg.caratula.logo_ancho || 140);
+          syncTextosP2(cfg.pagina2.tamano_textos_porcentaje || 100);
+          syncSeparacion(cfg.pagina2.separacion_bloques_px || 20);
+          syncColor(cfg.caratula.estilo_color || '#435A62');
+          syncLogoP2(cfg.pagina2.cabecera_logo_alto || 28);
+          chkLogoP2.checked = cfg.pagina2.cabecera_logo_visible !== false;
+          chkTituloBarra.checked = cfg.pagina2.titulo_barra_visible !== false;
+          inputTituloBarra.value = cfg.pagina2.titulo_barra_texto || 'PRESUPUESTO OFICIAL';
+          chkFotoDesc.checked = cfg.pagina2.foto_producto_descripcion !== false;
+          chkDescVis.checked = cfg.pagina2.descuento.visible !== false;
+          chkDescBorde.checked = cfg.pagina2.descuento.mostrar_cuadro_borde !== false;
+          inputDescTxt.value = cfg.pagina2.descuento.texto || '¡10% DE DESCUENTO POR PAGO AL CONTADO!';
+          pickerDescBg.value = cfg.pagina2.descuento.color_fondo || '#FEF2F2';
+          pickerDescTxt.value = cfg.pagina2.descuento.color_texto || '#DC2626';
+          pickerDescBorder.value = cfg.pagina2.descuento.color_borde || '#FECACA';
+          syncDescuentoUI();
+          sliderTerminosPos.value = cfg.pagina2.terminos.posicion_vertical_px ?? 20;
+          badgeTerminosPos.textContent = `${sliderTerminosPos.value} px`;
+          if (cfg.pagina2.terminos.titulo_html) {
+            editorTitulo.setHtml(cfg.pagina2.terminos.titulo_html);
+          } else if (cfg.pagina2.terminos.titulo) {
+            editorTitulo.setHtml(`<strong>${escapeHtml(cfg.pagina2.terminos.titulo)}</strong>`);
+          }
+          if (cfg.pagina2.terminos.clausulas_html) {
+            editorClausulas.setHtml(cfg.pagina2.terminos.clausulas_html);
+          } else if (Array.isArray(cfg.pagina2.terminos.clausulas) && cfg.pagina2.terminos.clausulas.length) {
+            editorClausulas.setHtml(`<ol class="list-decimal pl-4 space-y-1">${cfg.pagina2.terminos.clausulas.map(c => `<li>${escapeHtml(c)}</li>`).join('')}</ol>`);
+          }
+          chkP3Vis.checked = cfg.pagina3.visible !== false;
+          chkP3TitVis.checked = cfg.pagina3.titulo_visible !== false;
+          inputP3Tit.value = cfg.pagina3.titulo || 'FOTOS DE PRODUCTOS';
+          sliderP3PosV.value = cfg.pagina3.posicion_vertical_px || 20;
+          sliderP3PosH.value = cfg.pagina3.posicion_horizontal_px || 0;
+          sliderP3Gap.value = cfg.pagina3.separacion_fotos_px || 16;
+          sliderP3Altura.value = cfg.pagina3.altura_foto_mm || 80;
+          selectP3Ajuste.value = cfg.pagina3.ajuste_foto || 'contain';
+          selectP3Cols.value = String(cfg.pagina3.columnas_por_fila || 2);
+          chkP3Nombre.checked = cfg.pagina3.mostrar_nombre_producto !== false;
+          chkRedFb.checked = cfg.pie_pagina.redes.facebook !== false;
+          chkRedIg.checked = cfg.pie_pagina.redes.instagram !== false;
+          chkRedTk.checked = cfg.pie_pagina.redes.tiktok !== false;
+          chkRedWeb.checked = cfg.pie_pagina.redes.sitio_web !== false;
+          chkTel.checked = cfg.pie_pagina.contacto.incluir_telefonos !== false;
+          chkDir.checked = cfg.pie_pagina.contacto.incluir_direccion !== false;
+          inputCierre.value = cfg.pie_pagina.mensaje_cierre || '¡Muchas gracias por su preferencia!';
+        }
+      } catch (err) {
+        console.warn('[PresupuestoTab] Usando valores oficiales predeterminados:', err);
+      } finally {
+        updatePreview();
+      }
+    }
 
-        // Serializar estructura del template asegurando persistencia de basePdf
-        const payload = {
-          ...updated,
-          basePdf: currentTemplate?.basePdf || '/templates/presupuesto_base.pdf',
-          pageSize,
-          orientation,
-          terminos_condiciones_default: termsInput?.value || '',
-        };
+    loadConfigFromBackend();
 
+    // =========================================================================
+    // ACCIONES: GUARDAR, DESCARGAR, RESTABLECER
+    // =========================================================================
+    async function handleGuardarConfig() {
+      btnGuardarTop.disabled = true;
+      bottomSaveBtn.disabled = true;
+      try {
         const res = await apiFetch('/api/config/budget-template', {
           method: 'POST',
-          body: JSON.stringify(payload),
+          body: JSON.stringify(cfg),
         });
-
-        toast.success(res?.message || 'Plantilla de presupuesto guardada con éxito');
+        toast.success(res?.message || 'Configuración de presupuestos guardada con éxito');
       } catch (err) {
-        console.error('Error al guardar plantilla:', err);
-        toast.error('Error al guardar la plantilla: ' + (err.message || 'Error desconocido'));
+        console.error('Error al guardar configuración:', err);
+        toast.error('Error al guardar: ' + (err.message || 'Error desconocido'));
       } finally {
-        btnGuardar.disabled = false;
+        btnGuardarTop.disabled = false;
+        bottomSaveBtn.disabled = false;
       }
     }
 
-    async function handlePrevisualizarPDF() {
-      btnPreview.disabled = true;
+    async function handleDescargarMuestraPDF() {
+      btnDescargarTop.disabled = true;
       try {
-        toast.info('Generando documento de presupuesto con @pdfme...');
+        toast.info('Generando documento de muestra...');
         await BudgetDocumentService.generateBudgetPDF('PRES-2026-0003', {
           openInNewTab: true,
           download: false,
+          customConfig: cfg,
         });
-        toast.success('Documento generado en nueva pestaña');
+        toast.success('Muestra generada con éxito');
       } catch (err) {
-        console.error('Error al previsualizar presupuesto:', err);
-        toast.error('Error al generar PDF: ' + (err.message || 'Error desconocido'));
+        console.error('Error al generar muestra:', err);
+        toast.error('Error al generar PDF: ' + err.message);
       } finally {
-        btnPreview.disabled = false;
+        btnDescargarTop.disabled = false;
       }
     }
 
-    async function handleRestablecerBase() {
+    function handleRestablecerDefaults() {
       openConfirmModal({
-        title: 'Restablecer Plantilla Base',
-        message:
-          '¿Desea restablecer el diseñador a la plantilla base oficial predeterminada de R1 Personalizados?',
+        title: 'Restablecer Valores por Defecto',
+        message: '¿Desea restaurar todos los parámetros de presupuestos a sus valores oficiales de fábrica?',
         confirmText: 'Restablecer',
         confirmVariant: 'danger',
-        onConfirm: async ({ close }) => {
+        onConfirm: ({ close }) => {
           if (typeof close === 'function') close();
-          try {
-            const defaultTpl = await BudgetDocumentService.getDefaultBudgetTemplate();
-            currentTemplate = defaultTpl;
-            const resolvedBase = await resolveBasePdf(defaultTpl.basePdf);
-            if (activeBudgetDesigner) {
-              activeBudgetDesigner.updateTemplate({
-                ...defaultTpl,
-                basePdf: resolvedBase,
-              });
-              toast.success('Plantilla base restablecida');
-            }
-          } catch (err) {
-            toast.error('Error al restablecer plantilla: ' + err.message);
-          }
+          cfg = BudgetDocumentService.getDefaultBudgetConfig();
+          syncCaratulaLogo(140);
+          syncTextosP2(100);
+          syncSeparacion(20);
+          syncColor('#435A62');
+          syncLogoP2(28);
+          chkLogoP2.checked = true;
+          chkTituloBarra.checked = true;
+          inputTituloBarra.value = 'PRESUPUESTO OFICIAL';
+          chkFotoDesc.checked = true;
+          chkDescVis.checked = true;
+          chkDescBorde.checked = true;
+          inputDescTxt.value = '¡10% DE DESCUENTO POR PAGO AL CONTADO!';
+          pickerDescBg.value = '#FEF2F2';
+          pickerDescTxt.value = '#DC2626';
+          pickerDescBorder.value = '#FECACA';
+          syncDescuentoUI();
+          sliderTerminosPos.value = 20;
+          badgeTerminosPos.textContent = '20 px';
+          editorTitulo.setHtml('<strong>TÉRMINOS Y CONDICIONES</strong>');
+          editorClausulas.setHtml(defaultClausesHtml);
+          chkP3Vis.checked = true;
+          chkP3TitVis.checked = true;
+          inputP3Tit.value = 'FOTOS DE PRODUCTOS';
+          sliderP3PosV.value = 20;
+          sliderP3PosH.value = 0;
+          sliderP3Gap.value = 16;
+          sliderP3Altura.value = 80;
+          selectP3Ajuste.value = 'contain';
+          selectP3Cols.value = '2';
+          chkP3Nombre.checked = true;
+          chkRedFb.checked = true;
+          chkRedIg.checked = true;
+          chkRedTk.checked = true;
+          chkRedWeb.checked = true;
+          chkTel.checked = true;
+          chkDir.checked = true;
+          inputCierre.value = '¡Muchas gracias por su preferencia!';
+          updatePreview();
+          toast.success('Valores oficiales restablecidos');
         },
-      });
-    }
-
-    // Eventos de Selectores de Tamaño y Orientación
-    const selectSize = card.querySelector('#budget-page-size');
-    const customContainer = card.querySelector('#custom-size-container');
-    const selectOrient = card.querySelector('#budget-orientation');
-
-    if (selectSize) {
-      selectSize.addEventListener('change', () => {
-        if (selectSize.value === 'Custom') {
-          customContainer.classList.remove('hidden');
-        } else {
-          customContainer.classList.add('hidden');
-        }
       });
     }
   }

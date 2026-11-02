@@ -1193,7 +1193,7 @@ func (h *PedidosHandler) Update(w http.ResponseWriter, r *http.Request, id int) 
 					notas, created_by
 				) VALUES (?, ?, ?, 'Proveedor', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, 'Efectivo', ?, ?, ?, ?, ?)
 			`
-			notes := fmt.Sprintf("Generado automáticamente desde Pedido %s", id)
+			notes := fmt.Sprintf("Generado automáticamente desde Pedido %d", id)
 			_, _ = tx.ExecContext(r.Context(), insertPagoSQL,
 				numPago, id, ppID,
 				pr.ProveedorID, pr.NombreProveedor, provRUC, pr.EsNoRegistrado,

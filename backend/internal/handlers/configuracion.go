@@ -140,168 +140,82 @@ func (h *ConfiguracionHandler) GetBudgetTemplate(w http.ResponseWriter, r *http.
 		var rawValor string
 		err := h.DB.QueryRowContext(r.Context(), "SELECT valor FROM configuraciones WHERE clave = 'budget_template'").Scan(&rawValor)
 		if err == nil && strings.TrimSpace(rawValor) != "" {
-			var parsed any
+			var parsed map[string]any
 			if json.Unmarshal([]byte(rawValor), &parsed) == nil {
-				_ = json.NewEncoder(w).Encode(parsed)
-				return
+				// Si ya cuenta con la estructura enriquecida de personalización visual, devolverla
+				if _, ok := parsed["caratula"]; ok {
+					_ = json.NewEncoder(w).Encode(parsed)
+					return
+				}
 			}
 		}
 	}
 
-	// Template predeterminado basado en "Presupuesto - R1 personalizados"
-	defaultTemplate := map[string]any{
-		"basePdf":     "/templates/presupuesto_base.pdf",
-		"pageSize":    "A4",
-		"orientation": "portrait",
-		"schemas": []any{
-			// Hoja 1: Portada (sin campos dinámicos sobreimpresos)
-			[]any{},
-			// Hoja 2: Presupuesto Oficial con todos los campos mapeados
-			[]any{
-				map[string]any{
-					"name":      "cliente_nombre",
-					"type":      "text",
-					"position":  map[string]any{"x": 33, "y": 42},
-					"width":     65,
-					"height":    5,
-					"fontSize":  9,
-					"fontColor": "#0f172a",
-				},
-				map[string]any{
-					"name":      "cliente_ruc",
-					"type":      "text",
-					"position":  map[string]any{"x": 33, "y": 47},
-					"width":     65,
-					"height":    5,
-					"fontSize":  9,
-					"fontColor": "#0f172a",
-				},
-				map[string]any{
-					"name":      "validez_fecha",
-					"type":      "text",
-					"position":  map[string]any{"x": 38, "y": 52},
-					"width":     65,
-					"height":    5,
-					"fontSize":  9,
-					"fontColor": "#0f172a",
-				},
-				map[string]any{
-					"name":      "fecha_emision",
-					"type":      "text",
-					"position":  map[string]any{"x": 128, "y": 42},
-					"width":     55,
-					"height":    5,
-					"fontSize":  9,
-					"fontColor": "#0f172a",
-				},
-				map[string]any{
-					"name":      "cliente_telefono",
-					"type":      "text",
-					"position":  map[string]any{"x": 128, "y": 47},
-					"width":     55,
-					"height":    5,
-					"fontSize":  9,
-					"fontColor": "#0f172a",
-				},
-				map[string]any{
-					"name":      "numero_presupuesto",
-					"type":      "text",
-					"position":  map[string]any{"x": 138, "y": 52},
-					"width":     50,
-					"height":    5,
-					"fontSize":  9,
-					"fontColor": "#0f172a",
-				},
-				map[string]any{
-					"name":     "articulos_tabla",
-					"type":     "table",
-					"position": map[string]any{"x": 20, "y": 62},
-					"width":    170,
-					"height":   50,
-				},
-				map[string]any{
-					"name":      "subtotal",
-					"type":      "text",
-					"position":  map[string]any{"x": 145, "y": 120},
-					"width":     45,
-					"height":    5,
-					"fontSize":  9,
-					"alignment": "right",
-					"fontColor": "#0f172a",
-				},
-				map[string]any{
-					"name":      "monto_descuento",
-					"type":      "text",
-					"position":  map[string]any{"x": 145, "y": 125},
-					"width":     45,
-					"height":    5,
-					"fontSize":  9,
-					"alignment": "right",
-					"fontColor": "#dc2626",
-				},
-				map[string]any{
-					"name":      "total_final",
-					"type":      "text",
-					"position":  map[string]any{"x": 140, "y": 132},
-					"width":     50,
-					"height":    8,
-					"fontSize":  11,
-					"alignment": "right",
-					"fontColor": "#ffffff",
-				},
-				map[string]any{
-					"name":       "terminos_condiciones",
-					"type":       "text",
-					"position":   map[string]any{"x": 20, "y": 230},
-					"width":      170,
-					"height":     30,
-					"fontSize":   7.5,
-					"lineHeight": 1.25,
-					"fontColor":  "#334155",
-				},
+	// Configuración y Plantilla Oficial Predeterminada de R1 Personalizados
+	defaultConfig := map[string]any{
+		"basePdf": "/templates/presupuesto_base.pdf",
+		"caratula": map[string]any{
+			"logo_ancho":   140,
+			"estilo_color": "#435A62",
+			"logo_url":     "/logo/R1.png",
+		},
+		"pagina2": map[string]any{
+			"cabecera_logo_visible":     true,
+			"cabecera_logo_alto":        28,
+			"titulo_barra_visible":      true,
+			"titulo_barra_texto":        "PRESUPUESTO OFICIAL",
+			"tamano_textos_porcentaje":  100,
+			"separacion_bloques_px":     20,
+			"foto_producto_descripcion": true,
+			"descuento": map[string]any{
+				"visible":              true,
+				"mostrar_cuadro_borde": true,
+				"texto":                "¡10% DE DESCUENTO POR PAGO AL CONTADO!",
+				"color_fondo":          "#FEF2F2",
+				"color_texto":          "#DC2626",
+				"color_borde":          "#FECACA",
 			},
-			// Hoja 3: Fotos de Productos (grilla dinámica)
-			[]any{
-				map[string]any{
-					"name":     "foto_producto_1",
-					"type":     "image",
-					"position": map[string]any{"x": 30, "y": 35},
-					"width":    65,
-					"height":   55,
+			"terminos": map[string]any{
+				"titulo":               "TÉRMINOS Y CONDICIONES",
+				"titulo_html":          "<strong>TÉRMINOS Y CONDICIONES</strong>",
+				"posicion_vertical_px": 20,
+				"clausulas": []string{
+					"1. Validez de la oferta: Este presupuesto tiene una validez de 15 días corridos a partir de su fecha de emisión.",
+					"2. Condiciones de pago: El pedido se confirma con la entrega del 60%, por medio de efectivo o transferencia bancaria.",
+					"3. Plazos de entrega: Tiempo estimado de 3 a 5 días hábiles posterior a la aprobación del diseño y confirmación de seña.",
+					"4. Garantía y cambios: Tratándose de artículos personalizados, no se admiten cancelaciones una vez iniciada la producción.",
 				},
-				map[string]any{
-					"name":     "foto_producto_2",
-					"type":     "image",
-					"position": map[string]any{"x": 115, "y": 35},
-					"width":    65,
-					"height":   55,
-				},
-				map[string]any{
-					"name":     "foto_producto_3",
-					"type":     "image",
-					"position": map[string]any{"x": 30, "y": 105},
-					"width":    65,
-					"height":   55,
-				},
-				map[string]any{
-					"name":     "foto_producto_4",
-					"type":     "image",
-					"position": map[string]any{"x": 115, "y": 105},
-					"width":    65,
-					"height":   55,
-				},
-				map[string]any{
-					"name":     "foto_producto_5",
-					"type":     "image",
-					"position": map[string]any{"x": 30, "y": 175},
-					"width":    65,
-					"height":   55,
-				},
+				"clausulas_html": `<ol class="list-decimal pl-4 space-y-1"><li><strong>Validez de la oferta:</strong> Este presupuesto tiene una validez de 15 días corridos a partir de su fecha de emisión.</li><li><strong>Condiciones de pago:</strong> El pedido se confirma con la entrega del 60%, por medio de efectivo o transferencia bancaria.</li><li><strong>Plazos de entrega:</strong> Tiempo estimado de 3 a 5 días hábiles posterior a la aprobación del diseño y confirmación de seña.</li><li><strong>Garantía y cambios:</strong> Tratándose de artículos personalizados, no se admiten cancelaciones una vez iniciada la producción.</li></ol>`,
 			},
+		},
+		"pagina3": map[string]any{
+			"visible":                 true,
+			"titulo":                  "FOTOS DE PRODUCTOS",
+			"titulo_visible":          true,
+			"posicion_vertical_px":    20,
+			"posicion_horizontal_px":  0,
+			"separacion_fotos_px":     16,
+			"altura_foto_mm":          80,
+			"ajuste_foto":             "contain",
+			"columnas_por_fila":       2,
+			"mostrar_nombre_producto": true,
+		},
+		"pie_pagina": map[string]any{
+			"redes": map[string]bool{
+				"facebook":  true,
+				"instagram": true,
+				"tiktok":    true,
+				"sitio_web": true,
+			},
+			"contacto": map[string]bool{
+				"incluir_telefonos": true,
+				"incluir_direccion": true,
+			},
+			"mensaje_cierre": "¡Muchas gracias por su preferencia!",
 		},
 	}
 
-	_ = json.NewEncoder(w).Encode(defaultTemplate)
+	_ = json.NewEncoder(w).Encode(defaultConfig)
 }
 
 func (h *ConfiguracionHandler) SaveBudgetTemplate(w http.ResponseWriter, r *http.Request) {

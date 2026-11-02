@@ -1305,14 +1305,61 @@ export function renderPagosModule(container) {
       });
     });
 
-    openModal({
-      title: 'Generar Nuevo Pago',
-      content: content,
-      size: 'lg',
-      confirmText: 'Guardar Pago',
-      cancelText: 'Cancelar',
-      confirmVariant: 'primary',
-      onConfirm: async ({ close }) => {
+    // En lugar de modal, tomar toda el área asignada según AGENTS.md
+    moduleWrap.innerHTML = '';
+
+    const viewWrapper = document.createElement('div');
+    viewWrapper.className = 'space-y-6';
+
+    const header = document.createElement('div');
+    header.className = 'flex flex-wrap items-center justify-between gap-4';
+    header.innerHTML = `
+      <div>
+        <div class="flex items-center gap-2 text-xs text-slate-400 mb-1">
+          <button type="button" id="btn-back-pagos" class="hover:text-brand transition cursor-pointer flex items-center gap-1">
+            <i class="fa-solid fa-chevron-left text-[10px]"></i>
+            Pagos
+          </button>
+          <span>/</span>
+          <span class="text-slate-600 dark:text-slate-300 font-semibold">Generar Nuevo Pago</span>
+        </div>
+        <h1 class="text-xl sm:text-2xl font-black text-slate-900 dark:text-white">Generar Nuevo Pago</h1>
+      </div>
+      <div class="flex items-center gap-2" id="form-actions-top"></div>
+    `;
+
+    const topActions = header.querySelector('#form-actions-top');
+    const btnCancelTop = createButton({
+      text: 'Cancelar',
+      variant: 'cancel',
+      size: 'md',
+      onClick: () => renderPagosModule(moduleWrap),
+    });
+    topActions.appendChild(btnCancelTop);
+    header.querySelector('#btn-back-pagos')?.addEventListener('click', () => renderPagosModule(moduleWrap));
+    viewWrapper.appendChild(header);
+
+    const formCard = document.createElement('div');
+    formCard.className = 'p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs max-w-4xl space-y-6';
+    formCard.appendChild(content);
+
+    const footerActions = document.createElement('div');
+    footerActions.className = 'flex items-center justify-end gap-3 pt-4 border-t border-slate-100 dark:border-slate-800';
+
+    const btnCancelBottom = createButton({
+      text: 'Cancelar',
+      variant: 'cancel',
+      size: 'md',
+      onClick: () => renderPagosModule(moduleWrap),
+    });
+    footerActions.appendChild(btnCancelBottom);
+
+    const btnGuardar = createButton({
+      text: 'Guardar Pago',
+      icon: 'fa-solid fa-floppy-disk',
+      variant: 'primary',
+      size: 'md',
+      onClick: async () => {
         let provNombre = '';
         let provRuc = '';
         let provId = null;
@@ -1334,14 +1381,14 @@ export function renderPagosModule(container) {
 
           if (!provNombre) {
             toast.error('Indique el nombre del proveedor.');
-            return false;
+            return;
           }
         } else {
           const cliInp = content.querySelector('#modal-cli-input');
           cliNombre = cliInp ? cliInp.value.trim() : '';
           if (!cliNombre) {
             toast.error('Indique el nombre del cliente.');
-            return false;
+            return;
           }
         }
 
@@ -1358,13 +1405,13 @@ export function renderPagosModule(container) {
 
         if (!prodNombre) {
           toast.error('Indique el nombre del producto.');
-          return false;
+          return;
         }
 
         const montoTotal = parseGuaranies(totalInp.value);
         if (montoTotal <= 0) {
           toast.error('El monto total debe ser mayor a 0 Gs.');
-          return false;
+          return;
         }
 
         let montoPagado = 0;
@@ -1431,15 +1478,17 @@ export function renderPagosModule(container) {
           });
 
           toast.success(res?.message || 'Pago registrado exitosamente.');
-          if (typeof close === 'function') close();
-          await loadData();
+          renderPagosModule(moduleWrap);
         } catch (err) {
           console.error('[Error creando pago]', err);
           toast.error(err.message || 'Error al guardar el pago.');
-          return false;
         }
       },
     });
+    footerActions.appendChild(btnGuardar);
+    formCard.appendChild(footerActions);
+    viewWrapper.appendChild(formCard);
+    moduleWrap.appendChild(viewWrapper);
   }
 
   // ==========================================================================

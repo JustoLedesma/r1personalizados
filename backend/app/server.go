@@ -81,6 +81,7 @@ func Run() {
 	mux.HandleFunc("/api/whatsapp/stop", whatsappHandler.Stop)
 	mux.HandleFunc("/api/whatsapp/delete-session", whatsappHandler.DeleteSession)
 	mux.HandleFunc("/api/whatsapp/send", whatsappHandler.Send)
+	mux.HandleFunc("/api/whatsapp/render-pdf", whatsappHandler.RenderPDF)
 
 	// Rutas del módulo Productos
 	mux.HandleFunc("/api/productos", productosHandler.HandleCollection)
@@ -98,6 +99,7 @@ func Run() {
 	// Rutas del módulo Presupuestos y Plantillas PDF
 	mux.HandleFunc("/api/config/budget-template", configuracionHandler.HandleBudgetTemplate)
 	mux.HandleFunc("/api/budgets", budgetsHandler.HandleCollection)
+	mux.HandleFunc("/api/budgets/upload-image", budgetsHandler.HandleUploadImage)
 	mux.HandleFunc("/api/budgets/", budgetsHandler.HandleItem)
 
 	// Rutas del módulo Reciclaje
@@ -117,8 +119,11 @@ func Run() {
 
 	frontendDir := resolveDir("frontend", "../frontend")
 	logoDir := resolveDir("logo", "../logo", "frontend/logo")
+	uploadsDir := resolveDir("uploads", "../uploads", "frontend/uploads")
+	_ = os.MkdirAll(filepath.Join(uploadsDir, "presupuestos"), 0755)
 
 	mux.Handle("/logo/", http.StripPrefix("/logo/", http.FileServer(http.Dir(logoDir))))
+	mux.Handle("/uploads/", http.StripPrefix("/uploads/", http.FileServer(http.Dir(uploadsDir))))
 
 	fileServer := http.FileServer(http.Dir(frontendDir))
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -160,13 +165,28 @@ func Run() {
 func listenAvailablePort(startPort int, maxAttempts int) (net.Listener, int, error) {
 	for i := 0; i < maxAttempts; i++ {
 		port := startPort + i
-		ln, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
-		if err == nil {
-			if i > 0 {
-				log.Printf("[AVISO PUERTO] El puerto %d estaba ocupado; usando automáticamente el puerto %d", startPort, port)
-			}
-			return ln, port, nil
+		// Probar tcp4 en 0.0.0.0, tcp4 en 127.0.0.1 y finalmente tcp dual-stack
+		attempts := []struct {
+			net  string
+			addr string
+		}{
+			{"tcp4", fmt.Sprintf("0.0.0.0:%d", port)},
+			{"tcp4", fmt.Sprintf("127.0.0.1:%d", port)},
+			{"tcp", fmt.Sprintf(":%d", port)},
 		}
+
+		var lastErr error
+		for _, a := range attempts {
+			ln, err := net.Listen(a.net, a.addr)
+			if err == nil {
+				if i > 0 {
+					log.Printf("[AVISO PUERTO] El puerto %d no pudo abrirse; usando automáticamente el puerto %d", startPort, port)
+				}
+				return ln, port, nil
+			}
+			lastErr = err
+		}
+		log.Printf("[PUERTO %d RECHAZADO] %v", port, lastErr)
 	}
 	return nil, 0, fmt.Errorf("no se encontró ningún puerto libre entre %d y %d", startPort, startPort+maxAttempts-1)
 }

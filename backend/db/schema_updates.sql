@@ -535,3 +535,38 @@ INSERT IGNORE INTO `presupuesto_items` (`id`, `presupuesto_id`, `descripcion`, `
   (2, 3, 'Taza Especial Sublimada R1', 150000.00, 10, 1500000.00, '/logo/R1.png'),
   (3, 3, 'Taza Magica Sublimada 350ml', 45000.00, 10, 450000.00, '/logo/R1.png'),
   (4, 3, 'Kepis', 55000.00, 15, 825000.00, '/logo/R1.png');
+
+-- ============================================================================
+-- Actualización: Campos extendidos para Presupuestos, Cotizaciones y Proveedores
+-- ============================================================================
+ALTER TABLE `presupuestos` 
+  ADD COLUMN IF NOT EXISTS `cliente_casual` TINYINT(1) NOT NULL DEFAULT 0 AFTER `cliente_id`,
+  ADD COLUMN IF NOT EXISTS `moneda` VARCHAR(20) NOT NULL DEFAULT 'Gs.' AFTER `validez_fecha`,
+  ADD COLUMN IF NOT EXISTS `regimen_iva` VARCHAR(50) NOT NULL DEFAULT 'Exento de IVA' AFTER `moneda`,
+  ADD COLUMN IF NOT EXISTS `leyenda_descuento` VARCHAR(255) NULL AFTER `total_final`,
+  ADD COLUMN IF NOT EXISTS `mostrar_descuento_pdf` TINYINT(1) NOT NULL DEFAULT 1 AFTER `leyenda_descuento`,
+  ADD COLUMN IF NOT EXISTS `servicios_opcionales` JSON NULL AFTER `observaciones`,
+  ADD COLUMN IF NOT EXISTS `galeria_fotos` JSON NULL AFTER `servicios_opcionales`,
+  ADD COLUMN IF NOT EXISTS `mostrar_galeria_pdf` TINYINT(1) NOT NULL DEFAULT 1 AFTER `galeria_fotos`,
+  ADD COLUMN IF NOT EXISTS `galeria_layout` VARCHAR(30) NOT NULL DEFAULT '2x4' AFTER `mostrar_galeria_pdf`,
+  ADD COLUMN IF NOT EXISTS `pedido_id` INT NULL AFTER `galeria_layout`,
+  ADD CONSTRAINT `fk_presupuestos_pedido` FOREIGN KEY (`pedido_id`) REFERENCES `pedidos`(`id`) ON DELETE SET NULL;
+
+-- Asegurar compatibilidad para estado 'Anulado' (sin borrado de registros)
+ALTER TABLE `presupuestos` MODIFY COLUMN `estado` VARCHAR(30) NOT NULL DEFAULT 'Borrador';
+
+ALTER TABLE `presupuesto_items`
+  ADD COLUMN IF NOT EXISTS `es_no_registrado` TINYINT(1) NOT NULL DEFAULT 0 AFTER `producto_id`,
+  ADD COLUMN IF NOT EXISTS `sku` VARCHAR(100) NULL AFTER `es_no_registrado`,
+  ADD COLUMN IF NOT EXISTS `orden` INT NOT NULL DEFAULT 0 AFTER `imagen_url`,
+  ADD COLUMN IF NOT EXISTS `proveedor_id` INT NULL AFTER `orden`,
+  ADD COLUMN IF NOT EXISTS `proveedor_casual` TINYINT(1) NOT NULL DEFAULT 0 AFTER `proveedor_id`,
+  ADD COLUMN IF NOT EXISTS `proveedor_nombre` VARCHAR(150) NULL AFTER `proveedor_casual`,
+  ADD COLUMN IF NOT EXISTS `proveedor_costo` DECIMAL(15,2) NOT NULL DEFAULT 0 AFTER `proveedor_nombre`,
+  ADD COLUMN IF NOT EXISTS `proveedor_cantidad` INT NOT NULL DEFAULT 0 AFTER `proveedor_costo`,
+  ADD CONSTRAINT `fk_presupuesto_items_proveedor` FOREIGN KEY (`proveedor_id`) REFERENCES `proveedores`(`id`) ON DELETE SET NULL;
+
+-- ============================================================================
+-- AMPLIACIÓN DE COLUMNA imagen_url (Soporte para URLs largas y prevención de error 1406)
+-- ============================================================================
+ALTER TABLE `presupuesto_items` MODIFY COLUMN `imagen_url` TEXT NULL;

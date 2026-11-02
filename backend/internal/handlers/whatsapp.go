@@ -199,6 +199,14 @@ func (h *WhatsAppHandler) Send(w http.ResponseWriter, r *http.Request) {
 	h.proxyRequest(w, http.MethodPost, "/send", r.Body)
 }
 
+func (h *WhatsAppHandler) RenderPDF(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		auth.WriteJSONError(w, http.StatusMethodNotAllowed, "método no permitido")
+		return
+	}
+	h.proxyRequest(w, http.MethodPost, "/render-pdf", r.Body)
+}
+
 func (h *WhatsAppHandler) IsConnected() bool {
 	if !h.isWorkerReachable() {
 		return false
