@@ -88,16 +88,17 @@ async function ensureWWebJSPatched() {
       if (!window.WWebJS) return;
 
       window.WWebJS.mediaInfoToFile = ({ data, mimetype, filename }) => {
-        let clean = String(data || '').trim();
-        const commaIdx = clean.indexOf(',');
-        if (commaIdx !== -1 && clean.substring(0, commaIdx).includes('base64')) {
-          clean = clean.substring(commaIdx + 1);
+        let str = String(data || '').trim().replace(/[\s\r\n]+/g, '');
+        const commaIdx = str.indexOf(',');
+        if (commaIdx !== -1) {
+          str = str.substring(commaIdx + 1);
         }
-        try {
-          if (clean.includes('%')) clean = decodeURIComponent(clean);
-        } catch (_) {}
-        clean = clean.replace(/[^A-Za-z0-9+/=]/g, '');
-        const rem = clean.length % 4;
+        if (str.includes('%')) {
+          try { str = decodeURIComponent(str); } catch (_) {}
+        }
+        const unpadded = str.replace(/[^A-Za-z0-9+/]/g, '');
+        const rem = unpadded.length % 4;
+        let clean = unpadded;
         if (rem === 2) clean += '==';
         else if (rem === 3) clean += '=';
         else if (rem === 1) clean = clean.slice(0, -1);
@@ -108,9 +109,10 @@ async function ensureWWebJSPatched() {
         for (let i = 0; i < binaryData.length; i++) {
           view[i] = binaryData.charCodeAt(i);
         }
-        const blob = new Blob([buffer], { type: mimetype || 'application/pdf' });
+        const mime = mimetype || 'application/pdf';
+        const blob = new Blob([buffer], { type: mime });
         return new File([blob], filename || 'Presupuesto.pdf', {
-          type: mimetype || 'application/pdf',
+          type: mime,
           lastModified: Date.now(),
         });
       };
@@ -130,11 +132,12 @@ async function ensureWWebJSPatched() {
         const file = window.WWebJS.mediaInfoToFile(mediaInfo);
         const OpaqueData = window.require('WAWebMediaOpaqueData');
         const opaqueData = await OpaqueData.createFromData(file, mediaInfo.mimetype);
+        const isDoc = Boolean(forceDocument || mediaInfo.mimetype === 'application/pdf');
         const mediaParams = {
           asSticker: forceSticker,
           asGif: forceGif,
           isPtt: forceVoice,
-          asDocument: forceDocument,
+          asDocument: isDoc,
         };
 
         if (forceMediaHd && file.type.indexOf('image/') === 0) {
@@ -702,20 +705,21 @@ function parseDataUrl(dataUrl, fallbackMime) {
     }
   }
 
-  try {
-    if (base64.includes('%')) base64 = decodeURIComponent(base64);
-  } catch (_) {}
+  base64 = base64.replace(/[\s\r\n]+/g, '');
+  if (base64.includes('%')) {
+    try { base64 = decodeURIComponent(base64); } catch (_) {}
+  }
 
-  // Quitar cualquier carácter que no pertenezca al alfabeto Base64 estricto y asegurar padding
-  base64 = base64.replace(/[^A-Za-z0-9+/=]/g, '');
-  const rem = base64.length % 4;
-  if (rem === 2) base64 += '==';
-  else if (rem === 3) base64 += '=';
-  else if (rem === 1) base64 = base64.slice(0, -1);
+  const unpadded = base64.replace(/[^A-Za-z0-9+/]/g, '');
+  const rem = unpadded.length % 4;
+  let clean = unpadded;
+  if (rem === 2) clean += '==';
+  else if (rem === 3) clean += '=';
+  else if (rem === 1) clean = clean.slice(0, -1);
 
   return {
     mime,
-    base64
+    base64: clean
   };
 }
 

@@ -1309,7 +1309,7 @@ export function renderPagosModule(container) {
     moduleWrap.innerHTML = '';
 
     const viewWrapper = document.createElement('div');
-    viewWrapper.className = 'space-y-6';
+    viewWrapper.className = 'w-full space-y-6';
 
     const header = document.createElement('div');
     header.className = 'flex flex-wrap items-center justify-between gap-4';
@@ -1340,7 +1340,7 @@ export function renderPagosModule(container) {
     viewWrapper.appendChild(header);
 
     const formCard = document.createElement('div');
-    formCard.className = 'p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs max-w-4xl space-y-6';
+    formCard.className = 'w-full p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-6';
     formCard.appendChild(content);
 
     const footerActions = document.createElement('div');

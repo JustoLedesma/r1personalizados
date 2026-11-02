@@ -23,7 +23,7 @@ import {
   buildBudgetMessageText,
   generateBudgetPDFBlob,
   downloadBudgetPDFFile,
-} from '../services/budget-document.service.js?v=20261101_11';
+} from '../services/budget-document.service.js?v=20261102_02';
 
 /**
  * Normaliza cualquier formato de fecha a YYYY-MM-DD para <input type="date"> y MySQL
@@ -923,7 +923,12 @@ export function renderPresupuestosModule(container, onNavigate) {
       console.warn('[Presupuestos] Error cargando plantilla base:', err);
     }
 
-    renderBudgetForm(initialBudget, baseTemplateConfig, { isPreview });
+    try {
+      renderBudgetForm(initialBudget, baseTemplateConfig, { isPreview });
+    } catch (renderErr) {
+      console.error('[Presupuestos] Error renderizando formulario:', renderErr);
+      toast.error('Error al abrir presupuesto: ' + (renderErr.message || 'Error desconocido'));
+    }
   }
 
   function renderBudgetForm(existingData, templateConfig, { isPreview = false } = {}) {
@@ -947,13 +952,22 @@ export function renderPresupuestosModule(container, onNavigate) {
       moneda: existingData?.moneda || 'Gs.',
       regimen_iva: existingData?.regimen_iva || 'Exento de IVA',
       estado: existingData?.estado || 'Borrador',
-      cliente_id: existingData?.cliente?.id || null,
-      cliente_casual: Boolean(existingData?.cliente?.casual),
-      cliente_nombre: existingData?.cliente?.nombre || '',
-      cliente_ruc: existingData?.cliente?.ruc || existingData?.cliente?.rucBase || existingData?.cliente?.numeroDocumento || existingData?.cliente?.numero_documento || existingData?.cliente_ruc || '',
-      cliente_telefono: existingData?.cliente?.telefono || '',
-      cliente_email: existingData?.cliente?.email || '',
-      cliente_direccion: existingData?.cliente?.direccion || '',
+      cliente_id: existingData?.cliente?.id || existingData?.cliente_id || null,
+      cliente_casual: Boolean(existingData?.cliente?.casual || existingData?.cliente_casual),
+      cliente_nombre: String(existingData?.cliente?.nombre || existingData?.cliente_nombre || '').trim(),
+      cliente_ruc: (() => {
+        const nd = String(existingData?.cliente?.numeroDocumento || existingData?.cliente?.numero_documento || '').trim();
+        const r = String(existingData?.cliente?.ruc || '').trim();
+        const rb = String(existingData?.cliente?.rucBase || existingData?.cliente?.ruc_base || '').trim();
+        const cr = String(existingData?.cliente_ruc || '').trim();
+        if (existingData?.cliente?.tipoCliente === 'empresa' || existingData?.cliente?.tipo_cliente === 'empresa') {
+          return r || rb || nd || cr || '';
+        }
+        return nd || r || rb || cr || '';
+      })(),
+      cliente_telefono: String(existingData?.cliente?.telefono || existingData?.cliente_telefono || '').trim(),
+      cliente_email: String(existingData?.cliente?.email || existingData?.cliente_email || '').trim(),
+      cliente_direccion: String(existingData?.cliente?.direccion || existingData?.cliente_direccion || '').trim(),
       country_code: '+595',
       items: existingData?.items ? JSON.parse(JSON.stringify(existingData.items)) : [],
       servicios_opcionales: existingData?.servicios_opcionales ? JSON.parse(JSON.stringify(existingData.servicios_opcionales)) : [],
@@ -1179,7 +1193,7 @@ export function renderPresupuestosModule(container, onNavigate) {
             <div id="country-picker-container"></div>
             <input type="tel" id="inp-casual-telefono" placeholder="Ej: 986901117 (sin 0)" 
               class="flex-1 px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 focus:outline-none focus:border-brand transition font-mono"
-              value="${escapeHtml(formData.cliente_telefono.replace(/^\+[0-9]{1,4}|^0+/, ''))}" />
+              value="${escapeHtml(String(formData.cliente_telefono || '').replace(/^\+[0-9]{1,4}|^0+/, ''))}" />
           </div>
           <span class="text-[10px] text-slate-400 mt-1 block">Prefijo seleccionado con número sin 0 inicial</span>
         </div>
@@ -1260,7 +1274,21 @@ export function renderPresupuestosModule(container, onNavigate) {
 
         formData.cliente_id = c.id;
         formData.cliente_nombre = nom;
-        formData.cliente_ruc = c.ruc || c.rucBase || c.numeroDocumento || c.numero_documento || '';
+
+        // RUC / CI: Si no tiene RUC registrado, tomar el Número de Documento (CI)
+        let docCliente = '';
+        const rucVal = (c.ruc && typeof c.ruc === 'string' && c.ruc.trim() !== '') ? c.ruc.trim() : '';
+        const numDocVal = (c.numeroDocumento || c.numero_documento || '').trim();
+        const rucBaseVal = (c.rucBase || c.ruc_base || '').trim();
+
+        if (c.tipoCliente === 'empresa' || c.tipo_cliente === 'empresa') {
+          docCliente = rucVal || rucBaseVal || numDocVal;
+        } else {
+          // Persona física: si no tiene RUC registrado, tomar el Número de documento (CI)
+          docCliente = rucVal || numDocVal || rucBaseVal;
+        }
+
+        formData.cliente_ruc = docCliente;
         formData.cliente_telefono = wa;
         formData.cliente_direccion = c.direccion || '';
 
@@ -1725,22 +1753,22 @@ export function renderPresupuestosModule(container, onNavigate) {
         return apiFetch(url);
       },
       renderItemHtml: (pr) => {
-        const nom = pr.razonSocial || pr.razon_social || pr.nombreComercial || pr.nombre_comercial || 'Proveedor';
-        const doc = pr.rucDocumento || pr.ruc_documento || pr.ruc || 'S/D';
+        const nom = (pr.razonSocial || pr.razon_social || pr.nombreComercial || pr.nombre_comercial || pr.nombre || pr.contactoNombre || pr.contacto_nombre || pr.rubro || (pr.id ? `Proveedor #${pr.id}` : 'Proveedor')).trim();
+        const doc = (pr.rucDocumento || pr.ruc_documento || pr.ruc || pr.documento || pr.numeroDocumento || pr.numero_documento || '').trim() || 'S/D';
         return `
           <div class="autocomplete-item p-3 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer transition flex items-center justify-between gap-2"
             data-item-id="${pr.id}">
             <div>
               <div class="text-xs font-bold text-slate-800 dark:text-slate-200">${escapeHtml(nom)}</div>
-              <div class="text-[10px] text-slate-400">RUC: <span class="font-mono">${escapeHtml(doc)}</span></div>
+              <div class="text-[10px] text-slate-400">RUC: <span class="font-mono font-bold">${escapeHtml(doc)}</span></div>
             </div>
             <i class="fa-solid fa-check text-slate-300 text-xs"></i>
           </div>
         `;
       },
       onSelectItem: (pr) => {
-        const nom = pr.razonSocial || pr.razon_social || pr.nombreComercial || pr.nombre_comercial || 'Proveedor';
-        const doc = pr.rucDocumento || pr.ruc_documento || pr.ruc || '';
+        const nom = (pr.razonSocial || pr.razon_social || pr.nombreComercial || pr.nombre_comercial || pr.nombre || pr.contactoNombre || pr.contacto_nombre || 'Proveedor').trim();
+        const doc = (pr.rucDocumento || pr.ruc_documento || pr.ruc || pr.documento || pr.numeroDocumento || pr.numero_documento || '').trim();
         selectedProvId = pr.id;
         selectedProvNombre = nom;
         selectedProvRuc = doc;
@@ -3378,6 +3406,9 @@ export function renderPresupuestosModule(container, onNavigate) {
                 toast.error('El mensaje no puede estar vacío');
                 return;
               }
+
+              // Reemplazar cualquier variable remanente ({nombre}, {total}, etc.) para garantizar que ninguna llegue sin reemplazar
+              const finalMessageToSend = buildBudgetMessageText(textToSend, budget, templateConfig, formattedRecipientName);
               if (!cleanPhone) {
                 toast.error('El cliente no posee un número de WhatsApp registrado');
                 return;
@@ -3422,7 +3453,7 @@ export function renderPresupuestosModule(container, onNavigate) {
                   method: 'POST',
                   body: JSON.stringify({
                     phone: cleanPhone,
-                    message: textToSend,
+                    message: finalMessageToSend,
                     media: {
                       data: pdfAttachment.dataUri,
                       mime: 'application/pdf',

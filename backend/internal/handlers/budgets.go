@@ -44,50 +44,67 @@ func NewBudgetsHandler(dbConn *sql.DB) *BudgetsHandler {
 	return h
 }
 
-// normalizeDate asegura que cualquier fecha en formato DD/MM/YYYY o DD-MM-YYYY se transforme a YYYY-MM-DD
+// normalizeDate asegura que cualquier fecha en formato DD/MM/YYYY, YYYY-MM-DD o DD-MM-YYYY se transforme a YYYY-MM-DD para MySQL
 func normalizeDate(str string) string {
 	str = strings.TrimSpace(str)
 	if str == "" {
 		return time.Now().Format("2006-01-02")
 	}
+
+	for _, layout := range []string{
+		"2006-01-02",
+		"02/01/2006",
+		"2/1/2006",
+		"02-01-2006",
+		"2-1-2006",
+		"2006/01/02",
+		"2006/1/2",
+		time.RFC3339,
+	} {
+		if t, err := time.Parse(layout, str); err == nil {
+			return t.Format("2006-01-02")
+		}
+	}
+
 	if strings.Contains(str, "/") {
 		parts := strings.Split(str, "/")
 		if len(parts) == 3 {
-			d := strings.TrimSpace(parts[0])
-			m := strings.TrimSpace(parts[1])
-			y := strings.TrimSpace(parts[2])
-			if len(y) == 4 {
-				if len(d) == 1 {
-					d = "0" + d
-				}
-				if len(m) == 1 {
-					m = "0" + m
-				}
-				return fmt.Sprintf("%04s-%02s-%02s", y, m, d)
+			p0 := strings.TrimSpace(parts[0])
+			p1 := strings.TrimSpace(parts[1])
+			p2 := strings.TrimSpace(parts[2])
+			if len(p0) == 4 {
+				if len(p1) == 1 { p1 = "0" + p1 }
+				if len(p2) == 1 { p2 = "0" + p2 }
+				return fmt.Sprintf("%s-%s-%s", p0, p1, p2)
+			}
+			if len(p2) == 4 {
+				if len(p0) == 1 { p0 = "0" + p0 }
+				if len(p1) == 1 { p1 = "0" + p1 }
+				return fmt.Sprintf("%s-%s-%s", p2, p1, p0)
 			}
 		}
 	}
+
 	if strings.Contains(str, "-") {
 		parts := strings.Split(str, "-")
 		if len(parts) == 3 {
-			if len(parts[0]) == 4 {
-				return str
+			p0 := strings.TrimSpace(parts[0])
+			p1 := strings.TrimSpace(parts[1])
+			p2 := strings.TrimSpace(parts[2])
+			if len(p0) == 4 {
+				if len(p1) == 1 { p1 = "0" + p1 }
+				if len(p2) == 1 { p2 = "0" + p2 }
+				return fmt.Sprintf("%s-%s-%s", p0, p1, p2)
 			}
-			if len(parts[2]) == 4 {
-				d := strings.TrimSpace(parts[0])
-				m := strings.TrimSpace(parts[1])
-				y := strings.TrimSpace(parts[2])
-				if len(d) == 1 {
-					d = "0" + d
-				}
-				if len(m) == 1 {
-					m = "0" + m
-				}
-				return fmt.Sprintf("%04s-%02s-%02s", y, m, d)
+			if len(p2) == 4 {
+				if len(p0) == 1 { p0 = "0" + p0 }
+				if len(p1) == 1 { p1 = "0" + p1 }
+				return fmt.Sprintf("%s-%s-%s", p2, p1, p0)
 			}
 		}
 	}
-	return str
+
+	return time.Now().Format("2006-01-02")
 }
 
 // saveBase64Image guarda un data URI base64 como archivo WebP en uploads/presupuestos/ y retorna la URL relativa corta
@@ -1066,6 +1083,33 @@ func (h *BudgetsHandler) convertToOrder(w http.ResponseWriter, r *http.Request, 
 		clientIDVal = &v
 	}
 
+	// Obtener documento real del cliente (si es persona física y no tiene RUC, usar Número de Documento / CI)
+	docCliente := cliRuc
+	if clientIDVal != nil {
+		var tCli, numDoc, ruc, rucB string
+		if errC := tx.QueryRowContext(r.Context(), "SELECT COALESCE(tipo_cliente, ''), COALESCE(numero_documento, ''), COALESCE(ruc, ''), COALESCE(ruc_base, '') FROM clientes WHERE id = ?", *clientIDVal).Scan(&tCli, &numDoc, &ruc, &rucB); errC == nil {
+			ruc = strings.TrimSpace(ruc)
+			numDoc = strings.TrimSpace(numDoc)
+			rucB = strings.TrimSpace(rucB)
+			if tCli == "empresa" {
+				if ruc != "" {
+					docCliente = ruc
+				} else if rucB != "" {
+					docCliente = rucB
+				} else if numDoc != "" {
+					docCliente = numDoc
+				}
+			} else {
+				// Persona física: tomar el Número de documento (CI) si está disponible
+				if numDoc != "" {
+					docCliente = numDoc
+				} else if ruc != "" {
+					docCliente = ruc
+				}
+			}
+		}
+	}
+
 	notas := fmt.Sprintf("Generado automáticamente desde Presupuesto %s.", numPres)
 	if observaciones.Valid && strings.TrimSpace(observaciones.String) != "" {
 		notas += " Notas: " + observaciones.String
@@ -1085,7 +1129,7 @@ func (h *BudgetsHandler) convertToOrder(w http.ResponseWriter, r *http.Request, 
 
 	resOrder, err := tx.ExecContext(r.Context(), insertOrderSQL,
 		numeroPedido, clientIDVal, cliCasual, cliNom,
-		cliTel, cliRuc, cliDir,
+		cliTel, docCliente, cliDir,
 		totalFinal, totalFinal,
 		currentWeek, currentYear, notas,
 	)
@@ -1098,6 +1142,21 @@ func (h *BudgetsHandler) convertToOrder(w http.ResponseWriter, r *http.Request, 
 	nuevoPedidoID := int(pedidoID64)
 
 	// 4. Copiar ítems del presupuesto a `pedido_items` y `pedido_proveedores`
+	type budgetItemConversion struct {
+		ProductoID        *int
+		EsNoRegistrado     int
+		SKU                string
+		Descripcion        string
+		PrecioUnitario     float64
+		Cantidad           int
+		Total              float64
+		ProveedorID        *int
+		ProveedorCasual    int
+		ProveedorNombre    string
+		ProveedorCosto     float64
+		ProveedorCantidad  int
+	}
+
 	itemRows, err := tx.QueryContext(r.Context(), `
 		SELECT producto_id, es_no_registrado, COALESCE(sku, ''), descripcion, precio_unitario, cantidad, total,
 		       proveedor_id, COALESCE(proveedor_casual, 0), COALESCE(proveedor_nombre, ''), COALESCE(proveedor_costo, 0), COALESCE(proveedor_cantidad, 0)
@@ -1105,112 +1164,154 @@ func (h *BudgetsHandler) convertToOrder(w http.ResponseWriter, r *http.Request, 
 		WHERE presupuesto_id = ?
 		ORDER BY orden ASC, id ASC
 	`, bID)
+	if err != nil {
+		auth.WriteJSONError(w, http.StatusInternalServerError, "error al leer ítems del presupuesto: "+err.Error())
+		return
+	}
 
-	if err == nil {
-		defer itemRows.Close()
+	var itemsToConvert []budgetItemConversion
+	for itemRows.Next() {
+		var (
+			pID, provID                         sql.NullInt64
+			esNoReg, provCasual, cant, provCant int
+			sku, desc, provNom                  string
+			pu, tot, provCosto                  float64
+		)
+		if scanErr := itemRows.Scan(
+			&pID, &esNoReg, &sku, &desc, &pu, &cant, &tot,
+			&provID, &provCasual, &provNom, &provCosto, &provCant,
+		); scanErr == nil {
+			var prodIDPtr *int
+			if pID.Valid {
+				v := int(pID.Int64)
+				prodIDPtr = &v
+			}
+			var provIDPtr *int
+			if provID.Valid {
+				v := int(provID.Int64)
+				provIDPtr = &v
+			}
+			itemsToConvert = append(itemsToConvert, budgetItemConversion{
+				ProductoID:        prodIDPtr,
+				EsNoRegistrado:    esNoReg,
+				SKU:               sku,
+				Descripcion:       desc,
+				PrecioUnitario:    pu,
+				Cantidad:          cant,
+				Total:             tot,
+				ProveedorID:       provIDPtr,
+				ProveedorCasual:   provCasual,
+				ProveedorNombre:   provNom,
+				ProveedorCosto:    provCosto,
+				ProveedorCantidad: provCant,
+			})
+		}
+	}
+	itemRows.Close() // Cerrar inmediatamente para liberar la conexión de la transacción
 
-		insertItemSQL := `
-			INSERT INTO pedido_items (
-				pedido_id, producto_id, es_no_registrado, nombre_producto, sku, cantidad, precio_unitario, subtotal
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-		`
+	insertItemSQL := `
+		INSERT INTO pedido_items (
+			pedido_id, producto_id, es_no_registrado, nombre_producto, sku, cantidad, precio_unitario, subtotal
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	`
 
-		insertProvSQL := `
-			INSERT INTO pedido_proveedores (
-				pedido_id, proveedor_id, es_no_registrado, nombre_proveedor,
-				producto_id, producto_nombre,
-				cantidad, costo, subtotal,
-				estado_pago, monto_pagado, saldo_pendiente
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'Pendiente', 0, ?)
-		`
+	insertProvSQL := `
+		INSERT INTO pedido_proveedores (
+			pedido_id, proveedor_id, es_no_registrado, nombre_proveedor,
+			producto_id, producto_nombre,
+			cantidad, costo, subtotal,
+			estado_pago, monto_pagado, saldo_pendiente
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'Pendiente', 0, ?)
+	`
 
-		for itemRows.Next() {
-			var (
-				pID, provID                                          sql.NullInt64
-				esNoReg, provCasual, cant, provCant                  int
-				sku, desc, provNom                                   string
-				pu, tot, provCosto                                   float64
+	insertPagoSQL := `
+		INSERT INTO pagos (
+			numero_pago, pedido_id, pedido_proveedor_id, tipo_beneficiario,
+			proveedor_id, proveedor_nombre, proveedor_ruc, es_proveedor_temporal,
+			cliente_id, cliente_nombre, cliente_documento, cliente_telefono,
+			producto_id, producto_nombre, es_producto_temporal,
+			cantidad, monto_total, monto_pagado, saldo_pendiente,
+			estado_pago, metodo_pago, fecha_pago, semana_iso, anio_iso,
+			notas, created_by
+		) VALUES (?, ?, ?, 'Proveedor', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 'Pendiente', 'Efectivo', ?, ?, ?, ?, ?)
+	`
+
+	var lastPagoID int
+	_ = tx.QueryRowContext(r.Context(), "SELECT COALESCE(MAX(id), 0) FROM pagos").Scan(&lastPagoID)
+
+	for _, it := range itemsToConvert {
+		_, errItem := tx.ExecContext(r.Context(), insertItemSQL,
+			nuevoPedidoID, it.ProductoID, it.EsNoRegistrado, it.Descripcion, it.SKU, it.Cantidad, it.PrecioUnitario, it.Total,
+		)
+		if errItem != nil {
+			log.Printf("[Budgets] Error al insertar pedido_item: %v", errItem)
+		}
+
+		// Si el ítem tiene proveedor asociado o costo de compra
+		hasProvider := it.ProveedorID != nil || strings.TrimSpace(it.ProveedorNombre) != "" || it.ProveedorCosto > 0
+		if hasProvider {
+			pCant := it.ProveedorCantidad
+			if pCant <= 0 {
+				pCant = it.Cantidad
+			}
+			pSubt := float64(pCant) * it.ProveedorCosto
+
+			var provRUC string
+			provNom := strings.TrimSpace(it.ProveedorNombre)
+			if it.ProveedorID != nil && *it.ProveedorID > 0 {
+				var rucDoc, rz, nc string
+				_ = tx.QueryRowContext(r.Context(), "SELECT COALESCE(ruc_documento, ''), COALESCE(razon_social, ''), COALESCE(nombre_comercial, '') FROM proveedores WHERE id = ?", *it.ProveedorID).Scan(&rucDoc, &rz, &nc)
+				provRUC = rucDoc
+				if provNom == "" {
+					if rz != "" {
+						provNom = rz
+					} else {
+						provNom = nc
+					}
+				}
+			}
+			if provNom == "" {
+				provNom = "Proveedor Asignado"
+			}
+
+			resProv, errProv := tx.ExecContext(r.Context(), insertProvSQL,
+				nuevoPedidoID, it.ProveedorID, it.ProveedorCasual, provNom,
+				it.ProductoID, it.Descripcion,
+				pCant, it.ProveedorCosto, pSubt, pSubt,
 			)
+			if errProv == nil {
+				ppID64, _ := resProv.LastInsertId()
+				ppID := int(ppID64)
 
-			if scanErr := itemRows.Scan(
-				&pID, &esNoReg, &sku, &desc, &pu, &cant, &tot,
-				&provID, &provCasual, &provNom, &provCosto, &provCant,
-			); scanErr == nil {
-				var prodIDPtr *int
-				if pID.Valid {
-					v := int(pID.Int64)
-					prodIDPtr = &v
-				}
+				lastPagoID++
+				numPago := fmt.Sprintf("PAG-%06d", lastPagoID)
 
-				_, _ = tx.ExecContext(r.Context(), insertItemSQL,
-					nuevoPedidoID, prodIDPtr, esNoReg, desc, sku, cant, pu, tot,
+				notes := fmt.Sprintf("Generado automáticamente desde Presupuesto %s (Pedido %s)", numPres, numeroPedido)
+				fechaHoyStr := now.Format("2006-01-02")
+				_, errPago := tx.ExecContext(r.Context(), insertPagoSQL,
+					numPago, nuevoPedidoID, ppID,
+					it.ProveedorID, provNom, provRUC, it.ProveedorCasual,
+					clientIDVal, cliNom, docCliente, cliTel,
+					it.ProductoID, it.Descripcion, it.EsNoRegistrado,
+					pCant, pSubt, pSubt,
+					fechaHoyStr, currentWeek, currentYear,
+					notes, h.getActorName(r),
 				)
-
-				// Si el ítem tenía proveedor asociado, vincular a pedido_proveedores y a pagos
-				if provID.Valid || provNom != "" {
-					var prIDPtr *int
-					if provID.Valid {
-						v := int(provID.Int64)
-						prIDPtr = &v
-					}
-					pCant := provCant
-					if pCant <= 0 {
-						pCant = cant
-					}
-					pSubt := float64(pCant) * provCosto
-
-					resProv, errProv := tx.ExecContext(r.Context(), insertProvSQL,
-						nuevoPedidoID, prIDPtr, provCasual, provNom,
-						prodIDPtr, desc,
-						pCant, provCosto, pSubt, pSubt,
-					)
-					if errProv == nil {
-						ppID64, _ := resProv.LastInsertId()
-						ppID := int(ppID64)
-
-						var provRUC string
-						if prIDPtr != nil && *prIDPtr > 0 {
-							_ = tx.QueryRowContext(r.Context(), "SELECT COALESCE(ruc_documento, '') FROM proveedores WHERE id = ?", *prIDPtr).Scan(&provRUC)
-						}
-
-						var lastPagoID int
-						_ = tx.QueryRowContext(r.Context(), "SELECT COALESCE(MAX(id), 0) FROM pagos").Scan(&lastPagoID)
-						numPago := fmt.Sprintf("PAG-%06d", lastPagoID+1)
-
-						insertPagoSQL := `
-							INSERT INTO pagos (
-								numero_pago, pedido_id, pedido_proveedor_id, tipo_beneficiario,
-								proveedor_id, proveedor_nombre, proveedor_ruc, es_proveedor_temporal,
-								cliente_id, cliente_nombre, cliente_documento, cliente_telefono,
-								producto_id, producto_nombre, es_producto_temporal,
-								cantidad, monto_total, monto_pagado, saldo_pendiente,
-								estado_pago, metodo_pago, fecha_pago, semana_iso, anio_iso,
-								notas, created_by
-							) VALUES (?, ?, ?, 'Proveedor', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 0, ?, 'Pendiente', 'Efectivo', ?, ?, ?, ?, ?)
-						`
-						notes := fmt.Sprintf("Generado automáticamente desde Presupuesto %s (Pedido %s)", numPres, numeroPedido)
-						fechaHoyStr := now.Format("2006-01-02")
-						_, _ = tx.ExecContext(r.Context(), insertPagoSQL,
-							numPago, nuevoPedidoID, ppID,
-							prIDPtr, provNom, provRUC, provCasual,
-							clientIDVal, cliNom, cliRuc, cliTel,
-							prodIDPtr, desc,
-							pCant, pSubt, pSubt,
-							fechaHoyStr, currentWeek, currentYear,
-							notes, h.getActorName(r),
-						)
-					}
+				if errPago != nil {
+					log.Printf("[Budgets] Error al insertar pago para proveedor: %v", errPago)
 				}
+			} else {
+				log.Printf("[Budgets] Error al insertar pedido_proveedor: %v", errProv)
 			}
 		}
 	}
 
-	// 5. Actualizar estado del presupuesto a "Aprobado" y enlazar pedido_id
+	// 5. Actualizar estado del presupuesto a "Aprobado", guardar pedido_id y sincronizar documento
 	_, err = tx.ExecContext(r.Context(), `
 		UPDATE presupuestos 
-		SET estado = 'Aprobado', pedido_id = ? 
+		SET estado = 'Aprobado', pedido_id = ?, cliente_ruc = ?
 		WHERE id = ?
-	`, nuevoPedidoID, bID)
+	`, nuevoPedidoID, docCliente, bID)
 
 	if err != nil {
 		auth.WriteJSONError(w, http.StatusInternalServerError, "error al actualizar presupuesto: "+err.Error())
@@ -1351,15 +1452,40 @@ func (h *BudgetsHandler) fetchFromDB(r *http.Request, idOrNum string, empresa mo
 	}
 
 	var cID *int
+	docCliente := cliRuc
 	if cliID.Valid {
 		v := int(cliID.Int64)
 		cID = &v
+		if cliCasual == 0 {
+			var tCli, numDoc, ruc, rucB string
+			if errC := h.DB.QueryRowContext(r.Context(), "SELECT COALESCE(tipo_cliente, ''), COALESCE(numero_documento, ''), COALESCE(ruc, ''), COALESCE(ruc_base, '') FROM clientes WHERE id = ?", v).Scan(&tCli, &numDoc, &ruc, &rucB); errC == nil {
+				ruc = strings.TrimSpace(ruc)
+				numDoc = strings.TrimSpace(numDoc)
+				rucB = strings.TrimSpace(rucB)
+				if tCli == "empresa" {
+					if ruc != "" {
+						docCliente = ruc
+					} else if rucB != "" {
+						docCliente = rucB
+					} else if numDoc != "" {
+						docCliente = numDoc
+					}
+				} else {
+					// Persona física: tomar el Número de documento (CI) si está disponible
+					if numDoc != "" {
+						docCliente = numDoc
+					} else if ruc != "" {
+						docCliente = ruc
+					}
+				}
+			}
+		}
 	}
 	b.Cliente = models.BudgetClienteDTO{
 		ID:        cID,
 		Casual:    cliCasual == 1,
 		Nombre:    cliNom,
-		RUC:       cliRuc,
+		RUC:       docCliente,
 		Telefono:  cliTel,
 		Email:     cliEmail,
 		Direccion: cliDir,

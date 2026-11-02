@@ -11,8 +11,8 @@ import { renderReciclajeModule } from './reciclaje.js?v=20261030_10';
 import { renderConfiguracionModule } from './configuracion.js?v=20261031_8';
 import { renderProductosModule } from './productos.js?v=20261030_10';
 import { renderPedidosModule } from './pedidos.js?v=20261031_3';
-import { renderPagosModule } from './pagos.js?v=20261101_11';
-import { renderPresupuestosModule } from './presupuestos.js?v=20261101_11';
+import { renderPagosModule } from './pagos.js?v=20261102_02';
+import { renderPresupuestosModule } from './presupuestos.js?v=20261102_02';
 import {
   subscribeQueue,
   formatRemainingDuration,

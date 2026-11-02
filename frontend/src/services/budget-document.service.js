@@ -304,26 +304,14 @@ export function buildBudgetMessageText(templateText, budget, config, clientDispl
   const descGs = formatGs(montoDesc);
 
   txt = txt
-    .replace(/\{nombre\}/gi, clientName)
-    .replace(/\{cliente\}/gi, clientName)
-    .replace(/\{nombre_cliente\}/gi, clientName)
-    .replace(/\{cliente_nombre\}/gi, clientName)
-    .replace(/\{numero_presupuesto\}/gi, numPres)
-    .replace(/\{nro_presupuesto\}/gi, numPres)
-    .replace(/\{presupuesto\}/gi, numPres)
-    .replace(/\{total\}/gi, totalGs)
-    .replace(/\{total_final\}/gi, totalGs)
-    .replace(/\{monto_total\}/gi, totalGs)
-    .replace(/\{fecha\}/gi, fechaMsg)
-    .replace(/\{fecha_emision\}/gi, fechaMsg)
-    .replace(/\{validez\}/gi, validezText)
-    .replace(/\{validez_dias\}/gi, validezText)
-    .replace(/\{descuento_porcentaje\}/gi, pctStr ? `${pctStr}%` : '0%')
-    .replace(/\{porcentaje_descuento\}/gi, pctStr ? `${pctStr}%` : '0%')
-    .replace(/\{descuento_monto\}/gi, descGs)
-    .replace(/\{monto_descuento\}/gi, descGs)
-    .replace(/\{enlace_pdf\}/gi, `${window.location.origin}/#/presupuestos`)
-    .replace(/\{link_pdf\}/gi, `${window.location.origin}/#/presupuestos`);
+    .replace(/\{+\s*(?:nombre|cliente|nombre_cliente|cliente_nombre|name)\s*\}+/gi, clientName)
+    .replace(/\{+\s*(?:numero_presupuesto|nro_presupuesto|presupuesto|numero)\s*\}+/gi, numPres)
+    .replace(/\{+\s*(?:total|total_final|monto_total|monto)\s*\}+/gi, totalGs)
+    .replace(/\{+\s*(?:fecha|fecha_emision)\s*\}+/gi, fechaMsg)
+    .replace(/\{+\s*(?:validez|validez_dias)\s*\}+/gi, validezText)
+    .replace(/\{+\s*(?:descuento_porcentaje|porcentaje_descuento)\s*\}+/gi, pctStr ? `${pctStr}%` : '0%')
+    .replace(/\{+\s*(?:descuento_monto|monto_descuento)\s*\}+/gi, descGs)
+    .replace(/\{+\s*(?:enlace_pdf|link_pdf|pdf)\s*\}+/gi, `${window.location.origin}/#/presupuestos`);
 
   return txt;
 }
@@ -541,6 +529,26 @@ export function printOrDownloadBudgetDocument(budget, config, { openInNewTab = t
   });
 }
 
+function renderDocumentFooterHtml(c, themeColor) {
+  const redesList = [];
+  if (c.pie_pagina?.redes?.instagram) redesList.push('instagram.com/r1personalizados');
+  if (c.pie_pagina?.redes?.facebook) redesList.push('facebook.com/r1personalizados');
+  if (c.pie_pagina?.redes?.tiktok) redesList.push('tiktok.com/@r1personalizados');
+  if (c.pie_pagina?.redes?.sitio_web) redesList.push('netz.com.py');
+
+  const contactoList = [];
+  if (c.pie_pagina?.contacto?.incluir_telefonos) contactoList.push('+595 981 654321');
+  if (c.pie_pagina?.contacto?.incluir_direccion) contactoList.push('Pdte Franco, Paraguay');
+
+  return `
+    <div class="page-footer">
+      <div class="footer-close">${c.pie_pagina?.mensaje_cierre || '¡Muchas gracias por su preferencia!'}</div>
+      ${redesList.length > 0 ? `<div>${redesList.join(' • ')}</div>` : ''}
+      ${contactoList.length > 0 ? `<div>${contactoList.join(' • ')}</div>` : ''}
+    </div>
+  `;
+}
+
 /**
  * Genera el HTML/CSS A4 exacto según la configuración visual
  */
@@ -635,19 +643,7 @@ export function generateBudgetHtml(budget, config) {
               </div>
             `).join('')}
           </div>
-          <div class="page-footer">
-            <div class="footer-close">${c.pie_pagina?.mensaje_cierre || '¡Muchas gracias por su preferencia!'}</div>
-            <div>
-              ${c.pie_pagina?.redes?.instagram ? 'instagram.com/r1personalizados • ' : ''}
-              ${c.pie_pagina?.redes?.facebook ? 'facebook.com/r1personalizados • ' : ''}
-              ${c.pie_pagina?.redes?.tiktok ? 'tiktok.com/@r1personalizados • ' : ''}
-              ${c.pie_pagina?.redes?.sitio_web ? 'netz.com.py' : ''}
-            </div>
-            <div>
-              ${c.pie_pagina?.contacto?.incluir_telefonos ? '+595 981 654321 • ' : ''}
-              ${c.pie_pagina?.contacto?.incluir_direccion ? 'Pdte Franco, Paraguay' : ''}
-            </div>
-          </div>
+          ${renderDocumentFooterHtml(c, themeColor)}
         </div>
       `;
     }
@@ -752,7 +748,16 @@ export function generateBudgetHtml(budget, config) {
     <div class="meta-box">
       <div><strong>CLIENTE:</strong> ${cliente.nombre || b.cliente_nombre || 'Cliente General'}</div>
       <div><strong>FECHA:</strong> ${b.fecha_emision || '24/10/2026'}</div>
-      <div><strong>RUC / CI:</strong> ${cliente.ruc || b.cliente_ruc || cliente.numeroDocumento || cliente.rucBase || cliente.numero_documento || '—'}</div>
+      <div><strong>RUC / CI:</strong> ${(() => {
+        const nd = (cliente?.numeroDocumento || cliente?.numero_documento || '').trim();
+        const r = (cliente?.ruc || '').trim();
+        const rb = (cliente?.rucBase || cliente?.ruc_base || '').trim();
+        const cr = (b.cliente_ruc || '').trim();
+        if (cliente?.tipoCliente === 'empresa' || cliente?.tipo_cliente === 'empresa') {
+          return r || rb || nd || cr || '—';
+        }
+        return nd || r || rb || cr || '—';
+      })()}</div>
       <div><strong>TELÉFONO:</strong> ${cliente.telefono || b.cliente_telefono || '+595 981 654321'}</div>
       <div><strong>VALIDEZ HASTA:</strong> ${b.validez_fecha || '08/11/2026 (15 días)'}</div>
       <div><strong>N° PRESUPUESTO:</strong> ${b.numero_presupuesto || 'PRES-2026-0003'}</div>
@@ -860,19 +865,7 @@ export function generateBudgetHtml(budget, config) {
       <div class="terms-content">${clausulasHtml}</div>
     </div>
 
-    <div class="page-footer">
-      <div class="footer-close">${c.pie_pagina?.mensaje_cierre || '¡Muchas gracias por su preferencia!'}</div>
-      <div>
-        ${c.pie_pagina?.redes?.instagram ? 'instagram.com/r1personalizados • ' : ''}
-        ${c.pie_pagina?.redes?.facebook ? 'facebook.com/r1personalizados • ' : ''}
-        ${c.pie_pagina?.redes?.tiktok ? 'tiktok.com/@r1personalizados • ' : ''}
-        ${c.pie_pagina?.redes?.sitio_web ? 'netz.com.py' : ''}
-      </div>
-      <div>
-        ${c.pie_pagina?.contacto?.incluir_telefonos ? '+595 981 654321 • ' : ''}
-        ${c.pie_pagina?.contacto?.incluir_direccion ? 'Pdte Franco, Paraguay' : ''}
-      </div>
-    </div>
+    ${renderDocumentFooterHtml(c, themeColor)}
   </div>
 
   <!-- HOJA 3: FOTOS DE PRODUCTOS (Distribución dinámica cols x rows con paginación) -->
