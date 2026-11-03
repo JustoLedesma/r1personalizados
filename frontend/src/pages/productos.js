@@ -2205,20 +2205,23 @@ export function renderProductosModule(container) {
       galCard.className =
         'p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-3';
       galCard.innerHTML = `
-        <h3 class="text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300 flex items-center gap-1.5 pb-2 border-b border-slate-100 dark:border-slate-800">
-          <i class="fa-solid fa-images text-brand"></i>
-          <span>Galería de Fotos (${item.galeriaFotos.length})</span>
+        <h3 class="text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300 flex items-center justify-between gap-1.5 pb-2 border-b border-slate-100 dark:border-slate-800">
+          <span class="flex items-center gap-1.5">
+            <i class="fa-solid fa-images text-brand"></i>
+            <span>Galería de Fotos (${item.galeriaFotos.length})</span>
+          </span>
+          <span class="text-[10px] text-slate-400 font-normal">Clic para ampliar</span>
         </h3>
-        <div class="grid grid-cols-3 gap-2" id="detail-gallery-grid"></div>
+        <div class="flex flex-wrap gap-2.5" id="detail-gallery-grid"></div>
       `;
       const galGrid = galCard.querySelector('#detail-gallery-grid');
       item.galeriaFotos.forEach((gf, idx) => {
         const thumb = document.createElement('div');
         thumb.className =
-          'h-20 rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden cursor-pointer hover:ring-2 hover:ring-brand transition';
+          'w-16 h-16 sm:w-20 sm:h-20 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/80 p-1.5 flex items-center justify-center overflow-hidden cursor-pointer hover:ring-2 hover:ring-brand hover:shadow-xs transition group shrink-0';
         thumb.innerHTML = `<img src="${gf.data || gf}" alt="Foto ${
           idx + 1
-        }" class="w-full h-full object-cover">`;
+        }" class="w-full h-full object-contain group-hover:scale-105 transition">`;
         thumb.addEventListener('click', () => {
           openImageZoomModal({
             src: gf.data || gf,

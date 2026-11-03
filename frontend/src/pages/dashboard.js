@@ -9,10 +9,10 @@ import { renderSesionesWhatsAppModule } from './sesiones-whatsapp.js?v=20261030_
 import { renderDifusionMensajesModule } from './difusion-mensajes.js?v=20261030_8';
 import { renderReciclajeModule } from './reciclaje.js?v=20261030_10';
 import { renderConfiguracionModule } from './configuracion.js?v=20261102_15';
-import { renderProductosModule } from './productos.js?v=20261030_10';
+import { renderProductosModule } from './productos.js?v=20261102_16';
 import { renderPedidosModule } from './pedidos.js?v=20261031_3';
 import { renderPagosModule } from './pagos.js?v=20261102_02';
-import { renderPresupuestosModule } from './presupuestos.js?v=20261102_11';
+import { renderPresupuestosModule } from './presupuestos.js?v=20261102_16';
 import { renderUsuariosRolesPage } from './usuarios-roles.js?v=20261102_11';
 import { applyViewOnlyMode } from '../services/permissions.service.js?v=20261102_11';
 import {
