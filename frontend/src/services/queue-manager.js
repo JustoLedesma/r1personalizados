@@ -1,5 +1,6 @@
 import { apiFetch } from './api.js';
 import { toast } from '../components/toast.js';
+import { hasModuleAccess } from './permissions.service.js';
 
 const listeners = new Set();
 
@@ -145,10 +146,10 @@ export async function refreshWhatsAppStatus() {
   if (isPollingWA) return queueState.whatsapp;
   isPollingWA = true;
   try {
-    const res = await apiFetch('/api/whatsapp/status');
+    const res = await apiFetch('/api/whatsapp/status', { silent403: true });
     applyWhatsAppState(res);
   } catch (_) {
-    // Ignorar error puntual de red
+    // Ignorar si el usuario no tiene permisos o hay desconexión
   } finally {
     isPollingWA = false;
   }
@@ -219,9 +220,15 @@ function parseMySQLDateTimeToMs(str) {
 export async function syncPendingTasksFromDB() {
   if (initializedFromDB) return;
   initializedFromDB = true;
+
+  // Solo sincronizar tareas si el usuario actual tiene acceso al módulo de difusión
+  if (!hasModuleAccess('difusion-mensajes')) {
+    return;
+  }
+
   try {
     // 1. Sincronizar mensajes programados pendientes
-    const res = await apiFetch('/api/difusion-mensajes?page=1&page_size=50&estado=Programado');
+    const res = await apiFetch('/api/difusion-mensajes?page=1&page_size=50&estado=Programado', { silent403: true });
     if (res && Array.isArray(res.data)) {
       const now = Date.now();
       res.data.forEach((m) => {

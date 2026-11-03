@@ -1,5 +1,6 @@
 import { createButton } from '../components/button.js';
 import { openModal, openConfirmModal } from '../components/modal.js';
+import { createDataTable } from '../components/table.js';
 import { toast } from '../components/toast.js';
 import { apiFetch } from '../services/api.js';
 import { createPhoneInput } from '../components/phone-input.js';
@@ -47,16 +48,23 @@ export function renderConfiguracionModule(container) {
         },
       },
     },
-    perfil: {
-      id: 1,
-      username: 'admin',
-      email: 'admin@netz.local',
-      fullName: 'Operador Ventas',
-      role: 'admin',
-      fechaNacimiento: '1994-05-15',
-      fotoPerfil: '',
-      autoLogoutMinutes: 0,
-    },
+    perfil: (() => {
+      let u = null;
+      try {
+        const raw = sessionStorage.getItem('r1_session_user');
+        if (raw) u = JSON.parse(raw);
+      } catch (_) {}
+      return {
+        id: u?.id || 1,
+        username: u?.username || '',
+        email: u?.email || '',
+        fullName: u?.fullName || '',
+        role: u?.role || 'admin',
+        fechaNacimiento: '',
+        fotoPerfil: u?.fotoPerfil || '',
+        autoLogoutMinutes: u?.autoLogoutMinutes || 0,
+      };
+    })(),
     atributos: {
       categorias: [],
       marcas: [],
@@ -2936,23 +2944,52 @@ export function renderConfiguracionModule(container) {
     }
     refreshAvatarPreview();
 
+    const photoMetaEl = document.createElement('p');
+    photoMetaEl.className = 'text-[11px] font-mono text-slate-500 dark:text-slate-400 truncate max-w-[220px]';
+    if (p.fotoPerfil) {
+      photoMetaEl.textContent = 'WEBP · Foto de perfil activa';
+    }
+
     const fileInput = document.createElement('input');
     fileInput.type = 'file';
-    fileInput.accept = 'image/jpeg,image/png,image/webp';
+    fileInput.accept = 'image/jpeg,image/png,image/webp,image/x-icon';
     fileInput.className = 'hidden';
 
     fileInput.addEventListener('change', (e) => {
       const file = e.target.files?.[0];
       if (!file) return;
-      if (file.size > 10 * 1024 * 1024) {
-        toast.warning('La imagen supera el tamaño máximo permitido de 10 MB.');
-        return;
-      }
+
       const reader = new FileReader();
       reader.onload = (ev) => {
-        currentFotoData = ev.target.result;
-        refreshAvatarPreview();
-        toast.info('Fotografía cargada. Haz clic en "Guardar Perfil" para aplicar.');
+        const img = new Image();
+        img.onload = () => {
+          // Comprimir y redimensionar proporcionalmente a WebP (máx 400x400 para perfil)
+          const maxDim = 400;
+          let w = img.width;
+          let h = img.height;
+          if (w > maxDim || h > maxDim) {
+            if (w > h) {
+              h = Math.round((h * maxDim) / w);
+              w = maxDim;
+            } else {
+              w = Math.round((w * maxDim) / h);
+              h = maxDim;
+            }
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width = w;
+          canvas.height = h;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, w, h);
+          currentFotoData = canvas.toDataURL('image/webp', 0.88);
+          photoMetaEl.textContent = `WEBP · ${file.name}`;
+          refreshAvatarPreview();
+          toast.info('Fotografía procesada a WebP. Haz clic en "Guardar Perfil" para aplicar.');
+        };
+        img.onerror = () => {
+          toast.error('No se pudo procesar la imagen.');
+        };
+        img.src = ev.target.result;
       };
       reader.readAsDataURL(file);
     });
@@ -2969,10 +3006,11 @@ export function renderConfiguracionModule(container) {
       avatarCircle,
       choosePhotoBtn,
       fileInput,
+      photoMetaEl,
       (() => {
         const hint = document.createElement('p');
         hint.className = 'text-[11px] text-slate-400 dark:text-slate-500';
-        hint.innerHTML = 'Formatos admitidos: JPG, PNG o WebP.<br>Tamaño máx: 10 MB';
+        hint.innerHTML = 'Formatos: JPG, PNG o WebP.<br>Compresión automática a WebP.';
         return hint;
       })()
     );
@@ -3015,13 +3053,12 @@ export function renderConfiguracionModule(container) {
         </div>
         <div>
           <label class="block text-xs font-semibold text-slate-700 dark:text-slate-200 mb-1">
-            CORREO ELECTRÓNICO
+            CORREO ELECTRÓNICO <span class="text-danger">*</span>
           </label>
           <div class="relative">
-            <input type="text" readonly class="w-full px-3.5 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/80 text-slate-500 cursor-not-allowed" value="${escapeHtml(
-              p.email
-            )}">
-            <span class="absolute right-2.5 top-2.5 text-[10px] font-bold uppercase text-slate-400">SOLO LECTURA</span>
+            <input type="email" class="inp-email w-full px-3.5 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-brand" value="${escapeHtml(
+              p.email || ''
+            )}" placeholder="ejemplo@correo.com">
           </div>
         </div>
       </div>
@@ -3141,14 +3178,42 @@ export function renderConfiguracionModule(container) {
 
     const selTimeout = timeoutCard.querySelector('.sel-timeout');
     const txtRemTime = timeoutCard.querySelector('.txt-rem-time');
+
+    function updateRemainingDisplay() {
+      const v = Number(selTimeout.value);
+      if (v === 0) {
+        txtRemTime.textContent = 'Desactivado sin límite';
+        return;
+      }
+      if (typeof window.__getInactivityRemainingMinutes === 'function') {
+        const rem = window.__getInactivityRemainingMinutes();
+        if (rem !== null) {
+          const totalSecs = Math.max(0, Math.round(rem * 60));
+          const mins = Math.floor(totalSecs / 60);
+          const secs = totalSecs % 60;
+          txtRemTime.textContent = `${mins}m ${secs < 10 ? '0' : ''}${secs}s restantes`;
+          return;
+        }
+      }
+      txtRemTime.textContent = `${v} min`;
+    }
+
     selTimeout.addEventListener('change', () => {
       const v = Number(selTimeout.value);
-      txtRemTime.textContent = v === 0 ? 'Desactivado sin límite' : `${v} min`;
+      if (typeof window.__setInactivityTimeoutMinutes === 'function') {
+        window.__setInactivityTimeoutMinutes(v);
+      }
+      updateRemainingDisplay();
     });
 
+    const timerInterval = setInterval(updateRemainingDisplay, 1000);
+    updateRemainingDisplay();
+
     timeoutCard.querySelector('.btn-reset-timer')?.addEventListener('click', () => {
-      const v = Number(selTimeout.value);
-      txtRemTime.textContent = v === 0 ? 'Desactivado sin límite' : `${v} min`;
+      if (typeof window.__resetInactivityTimer === 'function') {
+        window.__resetInactivityTimer();
+      }
+      updateRemainingDisplay();
       toast.info('Temporizador de inactividad reiniciado.');
     });
 
@@ -3165,12 +3230,17 @@ export function renderConfiguracionModule(container) {
       size: 'md',
       onClick: async (_, btn) => {
         const newUsername = fieldsBox.querySelector('.inp-username').value.trim();
+        const newEmail = fieldsBox.querySelector('.inp-email').value.trim();
         const curPass = passCard.querySelector('.inp-cur-pass').value;
         const newPass = passCard.querySelector('.inp-new-pass').value;
         const confPass = passCard.querySelector('.inp-conf-pass').value;
 
         if (!newUsername) {
           toast.warning('El nombre de usuario es obligatorio.');
+          return;
+        }
+        if (!newEmail) {
+          toast.warning('El correo electrónico es obligatorio.');
           return;
         }
 
@@ -3195,6 +3265,7 @@ export function renderConfiguracionModule(container) {
             method: 'PUT',
             body: JSON.stringify({
               username: newUsername,
+              email: newEmail,
               fechaNacimiento: inpBirth.value,
               fotoPerfil: currentFotoData,
               autoLogoutMinutes: Number(selTimeout.value),
@@ -3203,6 +3274,7 @@ export function renderConfiguracionModule(container) {
             }),
           });
           p.username = newUsername;
+          p.email = newEmail;
           p.fechaNacimiento = inpBirth.value;
           p.fotoPerfil = currentFotoData;
           p.autoLogoutMinutes = Number(selTimeout.value);
@@ -3210,6 +3282,20 @@ export function renderConfiguracionModule(container) {
           passCard.querySelector('.inp-cur-pass').value = '';
           passCard.querySelector('.inp-new-pass').value = '';
           passCard.querySelector('.inp-conf-pass').value = '';
+
+          // Actualizar sesión en sessionStorage y propagar a avatar y temporizador
+          try {
+            const rawUser = sessionStorage.getItem('r1_session_user');
+            if (rawUser) {
+              const u = JSON.parse(rawUser);
+              u.username = newUsername;
+              u.email = newEmail;
+              u.fotoPerfil = currentFotoData;
+              u.autoLogoutMinutes = Number(selTimeout.value);
+              sessionStorage.setItem('r1_session_user', JSON.stringify(u));
+              window.dispatchEvent(new CustomEvent('profile:updated', { detail: u }));
+            }
+          } catch (_) {}
 
           toast.success('Perfil de usuario actualizado exitosamente.');
         } catch (err) {
@@ -3618,24 +3704,357 @@ export function renderConfiguracionModule(container) {
   }
 
   // ============================================================================
-  // PESTAÑA 7: LOGS (Queda vacía como solicitó el usuario)
+  // PESTAÑA 7: LOGS (Auditoría del Sistema)
   // ============================================================================
   function renderLogsTab(parent) {
     const card = document.createElement('section');
     card.className =
-      'w-full bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl p-10 sm:p-14 shadow-xs text-center space-y-3';
-    card.innerHTML = `
-      <div class="w-14 h-14 mx-auto rounded-2xl bg-brand-soft dark:bg-brand/20 text-brand flex items-center justify-center">
-        <i class="fa-solid fa-clock-rotate-left text-2xl"></i>
+      'w-full bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl p-6 sm:p-8 shadow-xs space-y-6';
+
+    // Cabecera de la sección de Logs
+    const header = document.createElement('div');
+    header.className = 'flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-4 border-b border-slate-100 dark:border-slate-800';
+    header.innerHTML = `
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-xl bg-brand-soft dark:bg-brand/20 text-brand flex items-center justify-center text-lg">
+          <i class="fa-solid fa-clock-rotate-left"></i>
+        </div>
+        <div>
+          <h3 class="text-base sm:text-lg font-bold text-slate-900 dark:text-white">
+            Historial y Auditoría de Logs
+          </h3>
+          <p class="text-xs text-slate-500 dark:text-slate-400">
+            Registro cronológico inmutable de accesos, modificaciones y operaciones críticas.
+          </p>
+        </div>
       </div>
-      <h3 class="text-base sm:text-lg font-bold text-slate-900 dark:text-white">
-        Historial de Logs del Sistema
-      </h3>
-      <p class="text-xs sm:text-sm text-slate-500 dark:text-slate-400 max-w-md mx-auto">
-        El registro detallado de eventos, auditorías de accesos y logs de seguridad del sistema se habilitará en las próximas versiones.
-      </p>
     `;
+
+    const exportBtn = createButton({
+      text: 'Exportar a CSV',
+      icon: '<i class="fa-solid fa-file-csv mr-2"></i>',
+      variant: 'primary',
+      onClick: () => {
+        const queryParams = new URLSearchParams({
+          module: card.querySelector('#logs-filter-module')?.value || '',
+          action: card.querySelector('#logs-filter-action')?.value || '',
+          search: card.querySelector('#logs-filter-search')?.value || '',
+          start_date: card.querySelector('#logs-filter-start')?.value || '',
+          end_date: card.querySelector('#logs-filter-end')?.value || '',
+        });
+        window.open(`./api/logs/export?${queryParams.toString()}`, '_blank');
+      },
+    });
+
+    header.appendChild(exportBtn);
+    card.appendChild(header);
+
+    // Barra de Filtros
+    const filtersBar = document.createElement('div');
+    filtersBar.className = 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 text-xs';
+    filtersBar.innerHTML = `
+      <div>
+        <label class="block font-semibold text-slate-600 dark:text-slate-300 mb-1">Módulo</label>
+        <select id="logs-filter-module" class="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-100 focus:ring-2 focus:ring-brand focus:outline-none">
+          <option value="">Todos los módulos</option>
+          <option value="Autenticación">Autenticación</option>
+          <option value="Usuarios y Roles">Usuarios y Roles</option>
+          <option value="Presupuestos">Presupuestos</option>
+          <option value="Pedidos">Pedidos</option>
+          <option value="Clientes">Clientes</option>
+          <option value="Proveedores">Proveedores</option>
+          <option value="Pagos">Pagos</option>
+          <option value="Productos">Productos</option>
+          <option value="Perfiles de Mensajes">Perfiles de Mensajes</option>
+          <option value="Sesiones WhatsApp">Sesiones WhatsApp</option>
+          <option value="Difusión y Mensajes">Difusión y Mensajes</option>
+          <option value="Reciclaje">Reciclaje</option>
+          <option value="Configuración">Configuración</option>
+        </select>
+      </div>
+
+      <div>
+        <label class="block font-semibold text-slate-600 dark:text-slate-300 mb-1">Acción</label>
+        <select id="logs-filter-action" class="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-100 focus:ring-2 focus:ring-brand focus:outline-none">
+          <option value="">Todas las acciones</option>
+          <option value="login">Inicio de Sesión (login)</option>
+          <option value="logout">Cierre de Sesión (logout)</option>
+          <option value="login_fallido">Intento Fallido</option>
+          <option value="crear">Creación (crear)</option>
+          <option value="editar">Modificación (editar)</option>
+          <option value="eliminar">Eliminación / Reciclaje</option>
+          <option value="restaurar">Restauración</option>
+          <option value="enviar_whatsapp">Envío de WhatsApp</option>
+        </select>
+      </div>
+
+      <div>
+        <label class="block font-semibold text-slate-600 dark:text-slate-300 mb-1">Desde</label>
+        <input type="date" id="logs-filter-start" class="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-100 focus:ring-2 focus:ring-brand focus:outline-none">
+      </div>
+
+      <div>
+        <label class="block font-semibold text-slate-600 dark:text-slate-300 mb-1">Hasta</label>
+        <input type="date" id="logs-filter-end" class="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-100 focus:ring-2 focus:ring-brand focus:outline-none">
+      </div>
+
+      <div>
+        <label class="block font-semibold text-slate-600 dark:text-slate-300 mb-1">Búsqueda rápida</label>
+        <input type="text" id="logs-filter-search" placeholder="Usuario, entidad, IP..." class="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-100 focus:ring-2 focus:ring-brand focus:outline-none">
+      </div>
+    `;
+    card.appendChild(filtersBar);
+
+    // Contenedor de la tabla de logs
+    const tableContainer = document.createElement('div');
+    tableContainer.className = 'w-full';
+    card.appendChild(tableContainer);
+
     parent.appendChild(card);
+
+    let currentPage = 1;
+
+    async function fetchLogs() {
+      tableContainer.innerHTML = `
+        <div class="w-full py-12 text-center text-slate-400">
+          <i class="fa-solid fa-circle-notch fa-spin text-2xl text-brand mb-2"></i>
+          <p class="text-xs">Consultando auditoría de logs...</p>
+        </div>
+      `;
+
+      const params = new URLSearchParams({
+        page: currentPage,
+        page_size: 20,
+        module: card.querySelector('#logs-filter-module')?.value || '',
+        action: card.querySelector('#logs-filter-action')?.value || '',
+        search: card.querySelector('#logs-filter-search')?.value || '',
+        start_date: card.querySelector('#logs-filter-start')?.value || '',
+        end_date: card.querySelector('#logs-filter-end')?.value || '',
+      });
+
+      try {
+        const res = await apiFetch(`/api/logs?${params.toString()}`);
+        renderLogsTable(res.data || [], res.total || 0, res.page || 1, res.page_size || 20);
+      } catch (err) {
+        tableContainer.innerHTML = `
+          <div class="w-full py-8 text-center text-red-500">
+            <i class="fa-solid fa-triangle-exclamation text-2xl mb-2"></i>
+            <p class="text-xs font-semibold">Error al obtener logs: ${escapeHtml(err.message)}</p>
+          </div>
+        `;
+      }
+    }
+
+    function renderLogsTable(logs, total, page, pageSize) {
+      tableContainer.innerHTML = '';
+
+      if (logs.length === 0) {
+        tableContainer.innerHTML = `
+          <div class="w-full py-12 text-center text-slate-400">
+            <i class="fa-solid fa-inbox text-3xl mb-2 opacity-50"></i>
+            <p class="text-xs">No se encontraron eventos de auditoría para los filtros seleccionados.</p>
+          </div>
+        `;
+        return;
+      }
+
+      const tableWrap = document.createElement('div');
+      tableWrap.className = 'overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800';
+
+      const table = document.createElement('table');
+      table.className = 'w-full text-left text-xs';
+      table.innerHTML = `
+        <thead class="bg-slate-50 dark:bg-slate-800/80 text-slate-600 dark:text-slate-300 font-semibold border-b border-slate-200 dark:border-slate-700">
+          <tr>
+            <th class="p-3">Fecha y Hora</th>
+            <th class="p-3">Usuario / IP</th>
+            <th class="p-3">Módulo</th>
+            <th class="p-3">Acción</th>
+            <th class="p-3">Entidad Afectada</th>
+            <th class="p-3 text-right">Detalles</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-100 dark:divide-slate-800">
+          ${logs
+            .map((l) => {
+              const dt = new Date(l.created_at);
+              const formattedDate = !isNaN(dt.getTime())
+                ? `${dt.toLocaleDateString('es-PY')} ${dt.toLocaleTimeString('es-PY', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`
+                : l.created_at;
+
+              let actionBadge = 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300';
+              if (l.action === 'login') actionBadge = 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400';
+              else if (l.action === 'login_fallido') actionBadge = 'bg-rose-100 text-rose-700 dark:bg-rose-950/40 dark:text-rose-400';
+              else if (l.action === 'crear') actionBadge = 'bg-blue-100 text-blue-700 dark:bg-blue-950/40 dark:text-blue-400';
+              else if (l.action === 'editar') actionBadge = 'bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-400';
+              else if (l.action === 'eliminar') actionBadge = 'bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-400';
+              else if (l.action === 'restaurar') actionBadge = 'bg-teal-100 text-teal-700 dark:bg-teal-950/40 dark:text-teal-400';
+              else if (l.action === 'logout') actionBadge = 'bg-purple-100 text-purple-700 dark:bg-purple-950/40 dark:text-purple-400';
+
+              const hasDiff = !!(l.old_values || l.new_values);
+
+              return `
+                <tr class="hover:bg-slate-50/50 dark:hover:bg-slate-800/40 transition">
+                  <td class="p-3 text-slate-500 dark:text-slate-400 font-mono text-[11px] whitespace-nowrap">${escapeHtml(formattedDate)}</td>
+                  <td class="p-3">
+                    <div class="font-semibold text-slate-800 dark:text-slate-100">${escapeHtml(l.username)}</div>
+                    <div class="text-[10px] text-slate-400 font-mono">${escapeHtml(l.ip_address || '-')}</div>
+                  </td>
+                  <td class="p-3">
+                    <span class="inline-block px-2 py-0.5 rounded font-medium bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+                      ${escapeHtml(l.module)}
+                    </span>
+                  </td>
+                  <td class="p-3">
+                    <span class="inline-block px-2.5 py-1 rounded-full font-semibold uppercase text-[10px] tracking-wide ${actionBadge}">
+                      ${escapeHtml(l.action)}
+                    </span>
+                  </td>
+                  <td class="p-3">
+                    <div class="font-medium text-slate-800 dark:text-slate-200">${escapeHtml(l.entity_name || l.entity_id || '-')}</div>
+                    ${l.entity_type ? `<div class="text-[10px] text-slate-400">${escapeHtml(l.entity_type)}</div>` : ''}
+                  </td>
+                  <td class="p-3 text-right">
+                    ${
+                      hasDiff
+                        ? `<button data-action="view-log-details" data-log-id="${l.id}" class="px-2.5 py-1 rounded bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 text-[11px] font-semibold transition">
+                            <i class="fa-solid fa-eye mr-1"></i> Ver Cambios
+                          </button>`
+                        : `<span class="text-slate-400 text-[11px] italic">-</span>`
+                    }
+                  </td>
+                </tr>
+              `;
+            })
+            .join('')}
+        </tbody>
+      </table>
+      `;
+
+      tableWrap.appendChild(table);
+      tableContainer.appendChild(tableWrap);
+
+      // Paginador estandarizado (20 por página si hay más de 20 registros)
+      if (total > pageSize) {
+        const totalPages = Math.ceil(total / pageSize);
+        const paginator = document.createElement('div');
+        paginator.className = 'flex items-center justify-between pt-4 text-xs text-slate-500';
+
+        const showingStart = (page - 1) * pageSize + 1;
+        const showingEnd = Math.min(page * pageSize, total);
+
+        paginator.innerHTML = `
+          <div>Mostrando ${showingStart}–${showingEnd} de ${total} registros</div>
+          <div class="flex items-center gap-1">
+            <button id="logs-prev-btn" class="px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed font-medium" ${page <= 1 ? 'disabled' : ''}>
+              <i class="fa-solid fa-chevron-left mr-1"></i> Anterior
+            </button>
+            <span class="px-3 py-1.5 font-bold text-slate-700 dark:text-slate-200">${page} / ${totalPages}</span>
+            <button id="logs-next-btn" class="px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed font-medium" ${page >= totalPages ? 'disabled' : ''}>
+              Siguiente <i class="fa-solid fa-chevron-right ml-1"></i>
+            </button>
+          </div>
+        `;
+
+        paginator.querySelector('#logs-prev-btn')?.addEventListener('click', () => {
+          if (currentPage > 1) {
+            currentPage--;
+            fetchLogs();
+          }
+        });
+
+        paginator.querySelector('#logs-next-btn')?.addEventListener('click', () => {
+          if (currentPage < totalPages) {
+            currentPage++;
+            fetchLogs();
+          }
+        });
+
+        tableContainer.appendChild(paginator);
+      }
+
+      // Evento para ver detalles de los cambios
+      tableContainer.querySelectorAll('[data-action="view-log-details"]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const logId = parseInt(btn.getAttribute('data-log-id'), 10);
+          const logItem = logs.find((l) => l.id === logId);
+          if (logItem) {
+            showLogDiffModal(logItem);
+          }
+        });
+      });
+    }
+
+    function showLogDiffModal(l) {
+      let oldObj = null;
+      let newObj = null;
+      try {
+        if (l.old_values) oldObj = JSON.parse(l.old_values);
+      } catch (_) {
+        oldObj = l.old_values;
+      }
+      try {
+        if (l.new_values) newObj = JSON.parse(l.new_values);
+      } catch (_) {
+        newObj = l.new_values;
+      }
+
+      const modalContent = document.createElement('div');
+      modalContent.className = 'space-y-4 text-xs';
+      modalContent.innerHTML = `
+        <div class="p-3 rounded-lg bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 grid grid-cols-2 sm:grid-cols-4 gap-2">
+          <div><span class="text-slate-400">Usuario:</span> <strong class="text-slate-800 dark:text-slate-100">${escapeHtml(l.username)}</strong></div>
+          <div><span class="text-slate-400">Módulo:</span> <strong class="text-slate-800 dark:text-slate-100">${escapeHtml(l.module)}</strong></div>
+          <div><span class="text-slate-400">Acción:</span> <strong class="text-slate-800 dark:text-slate-100">${escapeHtml(l.action)}</strong></div>
+          <div><span class="text-slate-400">IP:</span> <strong class="text-slate-800 dark:text-slate-100">${escapeHtml(l.ip_address)}</strong></div>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <h5 class="font-bold text-slate-700 dark:text-slate-200 mb-1 flex items-center gap-1.5">
+              <i class="fa-solid fa-clock-rotate-left text-slate-400"></i> Valor Anterior
+            </h5>
+            <div class="p-3 rounded-lg bg-red-50/50 dark:bg-red-950/20 border border-red-200 dark:border-red-900/50 max-h-60 overflow-y-auto font-mono text-[11px] text-slate-700 dark:text-slate-300">
+              <pre class="whitespace-pre-wrap">${oldObj ? escapeHtml(JSON.stringify(oldObj, null, 2)) : '<span class="italic text-slate-400">(Sin valores anteriores)</span>'}</pre>
+            </div>
+          </div>
+          <div>
+            <h5 class="font-bold text-slate-700 dark:text-slate-200 mb-1 flex items-center gap-1.5">
+              <i class="fa-solid fa-sparkles text-brand"></i> Valor Nuevo
+            </h5>
+            <div class="p-3 rounded-lg bg-emerald-50/50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-900/50 max-h-60 overflow-y-auto font-mono text-[11px] text-slate-700 dark:text-slate-300">
+              <pre class="whitespace-pre-wrap">${newObj ? escapeHtml(JSON.stringify(newObj, null, 2)) : '<span class="italic text-slate-400">(Sin valores nuevos)</span>'}</pre>
+            </div>
+          </div>
+        </div>
+      `;
+
+      openModal({
+        title: `Detalles de Auditoría #${l.id}`,
+        content: modalContent,
+        size: 'lg',
+        confirmText: 'Cerrar',
+        onConfirm: () => {},
+      });
+    }
+
+    // Debounce para filtros
+    let debounceTimer = null;
+    const triggerSearch = () => {
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        currentPage = 1;
+        fetchLogs();
+      }, 300);
+    };
+
+    card.querySelector('#logs-filter-module')?.addEventListener('change', triggerSearch);
+    card.querySelector('#logs-filter-action')?.addEventListener('change', triggerSearch);
+    card.querySelector('#logs-filter-start')?.addEventListener('change', triggerSearch);
+    card.querySelector('#logs-filter-end')?.addEventListener('change', triggerSearch);
+    card.querySelector('#logs-filter-search')?.addEventListener('input', triggerSearch);
+
+    fetchLogs();
   }
 
   // ============================================================================

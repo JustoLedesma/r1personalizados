@@ -48,7 +48,10 @@ export async function apiFetch(endpoint, options = {}, isRetry = false) {
   }
 
   if (response.status === 403) {
-    toast.error('Acceso denegado: no tienes permisos para realizar esta acción.');
+    const isMutation = options.method && options.method.toUpperCase() !== 'GET';
+    if (!options.silent && !options.silent403 && isMutation) {
+      toast.error('Acceso denegado: no tienes permisos para realizar esta acción.');
+    }
     throw new Error('Acceso denegado');
   }
 

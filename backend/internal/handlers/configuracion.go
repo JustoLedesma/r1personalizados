@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -274,10 +275,51 @@ func (h *ConfiguracionHandler) GetPerfil(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	claims, ok := r.Context().Value(auth.UserClaimsKey).(*auth.Claims)
-	userID := 1
-	if ok && claims != nil && claims.UserID > 0 {
-		userID = claims.UserID
+	claims := auth.CurrentUserClaims(r)
+	if claims == nil {
+		auth.WriteJSONError(w, http.StatusUnauthorized, "no autenticado")
+		return
+	}
+
+	if claims.IsRoot {
+		rootUser := os.Getenv("ROOT_USER")
+		if rootUser == "" {
+			rootUser = "Ju5t0L3d35m4"
+		}
+		p := models.UserProfile{
+			ID:                0,
+			Username:          rootUser,
+			Email:             rootUser + "@netz.local",
+			FullName:          "Super Administrador",
+			Role:              "admin",
+			AutoLogoutMinutes: 0,
+		}
+		var raw string
+		if err := h.DB.QueryRowContext(r.Context(), "SELECT valor FROM configuraciones WHERE clave = 'root_profile'").Scan(&raw); err == nil {
+			var rp struct {
+				Email             string `json:"email"`
+				FechaNacimiento   string `json:"fecha_nacimiento"`
+				FotoPerfil        string `json:"foto_perfil"`
+				AutoLogoutMinutes int    `json:"auto_logout_minutes"`
+			}
+			if json.Unmarshal([]byte(raw), &rp) == nil {
+				if rp.Email != "" {
+					p.Email = rp.Email
+				}
+				p.FechaNacimiento = rp.FechaNacimiento
+				p.FotoPerfil = rp.FotoPerfil
+				p.AutoLogoutMinutes = rp.AutoLogoutMinutes
+			}
+		}
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		_ = json.NewEncoder(w).Encode(p)
+		return
+	}
+
+	userID := claims.UserID
+	if userID <= 0 {
+		auth.WriteJSONError(w, http.StatusBadRequest, "identificador de usuario inválido")
+		return
 	}
 
 	var p models.UserProfile
@@ -316,14 +358,15 @@ func (h *ConfiguracionHandler) UpdatePerfil(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	claims, ok := r.Context().Value(auth.UserClaimsKey).(*auth.Claims)
-	userID := 1
-	if ok && claims != nil && claims.UserID > 0 {
-		userID = claims.UserID
+	claims := auth.CurrentUserClaims(r)
+	if claims == nil {
+		auth.WriteJSONError(w, http.StatusUnauthorized, "no autenticado")
+		return
 	}
 
 	var req struct {
 		Username          string `json:"username"`
+		Email             string `json:"email"`
 		FechaNacimiento   string `json:"fechaNacimiento"`
 		FotoPerfil        string `json:"fotoPerfil"`
 		AutoLogoutMinutes int    `json:"autoLogoutMinutes"`
@@ -337,8 +380,59 @@ func (h *ConfiguracionHandler) UpdatePerfil(w http.ResponseWriter, r *http.Reque
 	}
 
 	req.Username = strings.TrimSpace(req.Username)
+	req.Email = strings.TrimSpace(req.Email)
 	if req.Username == "" {
 		auth.WriteJSONError(w, http.StatusBadRequest, "el nombre de usuario es obligatorio")
+		return
+	}
+	if req.Email == "" {
+		auth.WriteJSONError(w, http.StatusBadRequest, "el correo electrónico es obligatorio")
+		return
+	}
+
+	if claims.IsRoot {
+		// Guardar perfil de root en configuraciones
+		data, _ := json.Marshal(map[string]any{
+			"email":               req.Email,
+			"fecha_nacimiento":    req.FechaNacimiento,
+			"foto_perfil":         req.FotoPerfil,
+			"auto_logout_minutes": req.AutoLogoutMinutes,
+		})
+		_, err := h.DB.ExecContext(r.Context(), `
+			INSERT INTO configuraciones (clave, valor)
+			VALUES ('root_profile', ?)
+			ON DUPLICATE KEY UPDATE valor = VALUES(valor)
+		`, string(data))
+		if err != nil {
+			auth.WriteJSONError(w, http.StatusInternalServerError, "error al guardar perfil de root: "+err.Error())
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status":  "ok",
+			"message": "Perfil de superadministrador actualizado correctamente",
+		})
+		return
+	}
+
+	userID := claims.UserID
+	if userID <= 0 {
+		auth.WriteJSONError(w, http.StatusBadRequest, "identificador de usuario inválido")
+		return
+	}
+
+	// Verificar unicidad de username y email excluyendo a sí mismo
+	var existsID int
+	err := h.DB.QueryRowContext(r.Context(), "SELECT id FROM users WHERE username = ? AND id != ? AND deleted_at IS NULL", req.Username, userID).Scan(&existsID)
+	if err == nil {
+		auth.WriteJSONError(w, http.StatusBadRequest, "el nombre de usuario ya está registrado por otro operador")
+		return
+	}
+
+	err = h.DB.QueryRowContext(r.Context(), "SELECT id FROM users WHERE email = ? AND id != ? AND deleted_at IS NULL", req.Email, userID).Scan(&existsID)
+	if err == nil {
+		auth.WriteJSONError(w, http.StatusBadRequest, "el correo electrónico ya está registrado por otro operador")
 		return
 	}
 
@@ -382,11 +476,12 @@ func (h *ConfiguracionHandler) UpdatePerfil(w http.ResponseWriter, r *http.Reque
 	query := `
 		UPDATE users SET
 			username = ?,
+			email = ?,
 			fecha_nacimiento = ?,
 			foto_perfil = ?,
 			auto_logout_minutes = ?
 	`
-	args := []any{req.Username, fechaVal, req.FotoPerfil, req.AutoLogoutMinutes}
+	args := []any{req.Username, req.Email, fechaVal, req.FotoPerfil, req.AutoLogoutMinutes}
 
 	if updatePassSQL != "" {
 		query += updatePassSQL
@@ -396,7 +491,7 @@ func (h *ConfiguracionHandler) UpdatePerfil(w http.ResponseWriter, r *http.Reque
 	query += " WHERE id = ? AND deleted_at IS NULL"
 	args = append(args, userID)
 
-	_, err := h.DB.ExecContext(r.Context(), query, args...)
+	_, err = h.DB.ExecContext(r.Context(), query, args...)
 	if err != nil {
 		auth.WriteJSONError(w, http.StatusInternalServerError, "no se pudo actualizar el perfil: "+err.Error())
 		return

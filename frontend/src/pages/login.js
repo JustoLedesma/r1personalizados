@@ -2,6 +2,7 @@ import { createButton } from '../components/button.js';
 import { createThemeToggle, LOGOS } from '../components/theme.js';
 import { toast } from '../components/toast.js';
 import { apiFetch } from '../services/api.js';
+import { setCurrentUser } from '../services/permissions.service.js';
 
 export function renderLoginPage(container, { onLoginSuccess } = {}) {
   container.innerHTML = '';
@@ -48,8 +49,8 @@ export function renderLoginPage(container, { onLoginSuccess } = {}) {
   userInput.name = 'identifier';
   userInput.type = 'text';
   userInput.autocomplete = 'username';
-  userInput.placeholder = 'admin@netz.local';
-  userInput.value = 'admin@netz.local';
+  userInput.placeholder = 'ej. usuario o correo@ejemplo.com';
+  userInput.value = '';
   userInput.required = true;
   userInput.className =
     'w-full min-h-[40px] px-3.5 py-2 text-xs sm:text-sm rounded-lg bg-slate-50/90 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-brand focus:border-transparent transition';
@@ -69,7 +70,7 @@ export function renderLoginPage(container, { onLoginSuccess } = {}) {
   passInput.type = 'password';
   passInput.autocomplete = 'current-password';
   passInput.placeholder = '••••••••';
-  passInput.value = 'admin123';
+  passInput.value = '';
   passInput.required = true;
   passInput.className =
     'w-full min-h-[40px] px-3.5 py-2 text-xs sm:text-sm rounded-lg bg-slate-50/90 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-brand focus:border-transparent transition';
@@ -103,23 +104,13 @@ export function renderLoginPage(container, { onLoginSuccess } = {}) {
         method: 'POST',
         body: JSON.stringify({ identifier, password }),
       });
+      setCurrentUser(res.user);
       toast.success('Sesión iniciada correctamente.');
       if (typeof onLoginSuccess === 'function') {
         onLoginSuccess(res.user);
       }
-    } catch (_) {
-      // Si el servidor Go aún no está levantado (ej. vista estática), permitir ingreso de demostración
-      const defaultUser = {
-        id: 1,
-        username: 'admin',
-        email: identifier,
-        fullName: 'Operador Ventas',
-        role: 'admin',
-      };
-      toast.info('Ingresando al panel de control.');
-      if (typeof onLoginSuccess === 'function') {
-        onLoginSuccess(defaultUser);
-      }
+    } catch (err) {
+      toast.error(err.message || 'Error al iniciar sesión');
     } finally {
       submitBtn.setLoading(false);
     }

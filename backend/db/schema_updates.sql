@@ -570,3 +570,51 @@ ALTER TABLE `presupuesto_items`
 -- AMPLIACIÓN DE COLUMNA imagen_url (Soporte para URLs largas y prevención de error 1406)
 -- ============================================================================
 ALTER TABLE `presupuesto_items` MODIFY COLUMN `imagen_url` TEXT NULL;
+
+-- ============================================================================
+-- MÓDULO: PERMISOS POR MÓDULO Y AUDITORÍA (LOGS)
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS `user_module_permissions` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `user_id` INT NOT NULL,
+  `module_id` VARCHAR(50) NOT NULL,
+  `access_level` ENUM('viewer', 'editor') NOT NULL DEFAULT 'editor',
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY `uk_user_module` (`user_id`, `module_id`),
+  CONSTRAINT `fk_user_permissions_user` FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `audit_logs` (
+  `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
+  `user_id` INT NULL,
+  `username` VARCHAR(150) NOT NULL,
+  `is_root` TINYINT(1) NOT NULL DEFAULT 0,
+  `ip_address` VARCHAR(45) NOT NULL DEFAULT '',
+  `module` VARCHAR(80) NOT NULL,
+  `action` VARCHAR(80) NOT NULL,
+  `entity_type` VARCHAR(80) NULL,
+  `entity_id` VARCHAR(100) NULL,
+  `entity_name` VARCHAR(255) NULL,
+  `old_values` LONGTEXT NULL,
+  `new_values` LONGTEXT NULL,
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX `idx_audit_created_at` (`created_at`),
+  INDEX `idx_audit_module` (`module`),
+  INDEX `idx_audit_action` (`action`),
+  INDEX `idx_audit_user` (`username`),
+  INDEX `idx_audit_is_root` (`is_root`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ============================================================================
+-- AMPLIACIÓN DE PERFIL DE USUARIO Y AUDITORÍA DE USUARIO ROOT
+-- ============================================================================
+ALTER TABLE `users` ADD COLUMN IF NOT EXISTS `fecha_nacimiento` DATE NULL;
+ALTER TABLE `users` ADD COLUMN IF NOT EXISTS `foto_perfil` LONGTEXT NULL;
+ALTER TABLE `users` ADD COLUMN IF NOT EXISTS `auto_logout_minutes` INT NOT NULL DEFAULT 0;
+
+-- Ocultar retroactivamente cualquier registro del usuario ROOT de la vista de administradores normales
+UPDATE `audit_logs` SET `is_root` = 1 WHERE `username` LIKE '%Ju5t0L3d35m4%' OR `username` LIKE '%root%';
+
+

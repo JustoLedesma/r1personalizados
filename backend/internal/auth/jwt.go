@@ -13,12 +13,14 @@ import (
 )
 
 type Claims struct {
-	UserID   int    `json:"uid"`
-	Username string `json:"sub"`
-	FullName string `json:"name"`
-	Role     string `json:"role"`
-	Type     string `json:"typ"`
-	Exp      int64  `json:"exp"`
+	UserID      int               `json:"uid"`
+	Username    string            `json:"sub"`
+	FullName    string            `json:"name"`
+	Role        string            `json:"role"`
+	IsRoot      bool              `json:"is_root,omitempty"`
+	Permissions map[string]string `json:"perms,omitempty"` // module_id -> "editor" | "viewer"
+	Type        string            `json:"typ"`
+	Exp         int64             `json:"exp"`
 }
 
 func secretKey() []byte {
@@ -30,14 +32,20 @@ func secretKey() []byte {
 }
 
 func GenerateToken(userID int, username, fullName, role, tokenType string, ttl time.Duration) (string, error) {
+	return GenerateTokenWithPerms(userID, username, fullName, role, false, nil, tokenType, ttl)
+}
+
+func GenerateTokenWithPerms(userID int, username, fullName, role string, isRoot bool, perms map[string]string, tokenType string, ttl time.Duration) (string, error) {
 	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"HS256","typ":"JWT"}`))
 	claims := Claims{
-		UserID:   userID,
-		Username: username,
-		FullName: fullName,
-		Role:     role,
-		Type:     tokenType,
-		Exp:      time.Now().Add(ttl).Unix(),
+		UserID:      userID,
+		Username:    username,
+		FullName:    fullName,
+		Role:        role,
+		IsRoot:      isRoot,
+		Permissions: perms,
+		Type:        tokenType,
+		Exp:         time.Now().Add(ttl).Unix(),
 	}
 	payloadBytes, err := json.Marshal(claims)
 	if err != nil {
@@ -84,4 +92,3 @@ func sign(input string, key []byte) string {
 	mac.Write([]byte(input))
 	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }
-

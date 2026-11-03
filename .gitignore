@@ -1,5 +1,6 @@
 # Variables de entorno (nunca versionar credenciales reales)
 .env
+.env.example
 backend/.env
 
 # Dependencias y binarios

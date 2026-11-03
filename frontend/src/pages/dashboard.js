@@ -8,18 +8,30 @@ import { renderPerfilesMensajesModule } from './perfiles-mensajes.js?v=20261030_
 import { renderSesionesWhatsAppModule } from './sesiones-whatsapp.js?v=20261030_8';
 import { renderDifusionMensajesModule } from './difusion-mensajes.js?v=20261030_8';
 import { renderReciclajeModule } from './reciclaje.js?v=20261030_10';
-import { renderConfiguracionModule } from './configuracion.js?v=20261031_8';
+import { renderConfiguracionModule } from './configuracion.js?v=20261102_15';
 import { renderProductosModule } from './productos.js?v=20261030_10';
 import { renderPedidosModule } from './pedidos.js?v=20261031_3';
 import { renderPagosModule } from './pagos.js?v=20261102_02';
-import { renderPresupuestosModule } from './presupuestos.js?v=20261102_02';
+import { renderPresupuestosModule } from './presupuestos.js?v=20261102_11';
+import { renderUsuariosRolesPage } from './usuarios-roles.js?v=20261102_11';
+import { applyViewOnlyMode } from '../services/permissions.service.js?v=20261102_11';
 import {
   subscribeQueue,
   formatRemainingDuration,
   syncPendingTasksFromDB,
   setPreferredBroadcastTab,
   clearCompletedBroadcastBanner,
-} from '../services/queue-manager.js?v=20261030_8';
+} from '../services/queue-manager.js?v=20261102_12';
+
+function escapeHtml(str) {
+  if (str === null || str === undefined) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
 
 export const MENU_MODULES = [
   { id: 'dashboard', label: 'Panel General', icon: 'fa-solid fa-table-cells-large', roles: ['admin', 'editor', 'viewer'] },
@@ -46,8 +58,31 @@ export function renderDashboardLayout(container, { user, activeModule = 'dashboa
   };
 
   const role = (currentUser.role || 'admin').toLowerCase();
-  const allowedModules = MENU_MODULES.filter((m) => m.roles.includes(role));
-  const currentMod = allowedModules.find((m) => m.id === activeModule) || allowedModules[0];
+
+  const modPermMap = {
+    dashboard: 'dashboard',
+    pedidos: 'pedidos',
+    presupuestos: 'presupuestos',
+    clientes: 'clientes',
+    proveedor: 'proveedores',
+    pagos: 'pagos',
+    productos: 'productos',
+    mensajes: 'perfiles-mensajes',
+    sessions: 'sesiones-whatsapp',
+    broadcast: 'difusion-mensajes',
+    users: 'usuarios-roles',
+    reciclaje: 'reciclaje',
+    configuracion: 'configuracion',
+  };
+
+  const allowedModules = MENU_MODULES.filter((m) => {
+    if (currentUser.isRoot || role === 'admin') return true;
+    if (m.id === 'users') return false; // Usuarios y roles solo para admin / root
+    const permKey = modPermMap[m.id] || m.id;
+    if (!currentUser.permissions) return false;
+    return !!currentUser.permissions[permKey];
+  });
+  const currentMod = allowedModules.find((m) => m.id === activeModule) || allowedModules[0] || MENU_MODULES[0];
 
   const shell = document.createElement('div');
   shell.className =
@@ -155,24 +190,41 @@ export function renderDashboardLayout(container, { user, activeModule = 'dashboa
   sidebarFooter.className =
     'px-4 py-3.5 border-t border-slate-100 dark:border-slate-800/80 flex items-center gap-3 shrink-0';
 
-  const initials = (currentUser.fullName || 'Operador Ventas')
-    .split(' ')
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0].toUpperCase())
-    .join('');
-
   const avatar = document.createElement('div');
   avatar.className =
-    'w-8 h-8 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-xs font-bold flex items-center justify-center shrink-0';
-  avatar.textContent = initials || 'OP';
+    'w-8 h-8 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-xs font-bold flex items-center justify-center shrink-0 overflow-hidden';
 
   const userMeta = document.createElement('div');
   userMeta.className = 'min-w-0 flex-1';
-  userMeta.innerHTML = `
-    <p class="text-xs font-semibold text-slate-800 dark:text-slate-100 truncate leading-tight">${currentUser.fullName || 'Operador Ventas'}</p>
-    <p class="text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 leading-tight mt-0.5">${(currentUser.role || 'ADMIN').toUpperCase()}</p>
-  `;
+
+  function renderUserAvatarAndMeta(u) {
+    if (u.fotoPerfil) {
+      avatar.innerHTML = `<img src="${u.fotoPerfil}" alt="${escapeHtml(u.fullName || u.username || 'Usuario')}" class="w-full h-full object-cover">`;
+    } else {
+      const initials = (u.fullName || u.username || 'Operador Ventas')
+        .split(' ')
+        .filter(Boolean)
+        .slice(0, 2)
+        .map((part) => part[0].toUpperCase())
+        .join('');
+      avatar.textContent = initials || 'OP';
+    }
+
+    userMeta.innerHTML = `
+      <p class="text-xs font-semibold text-slate-800 dark:text-slate-100 truncate leading-tight">${escapeHtml(u.fullName || u.username || 'Operador Ventas')}</p>
+      <p class="text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 leading-tight mt-0.5">${escapeHtml((u.role || 'ADMIN').toUpperCase())}</p>
+    `;
+  }
+
+  renderUserAvatarAndMeta(currentUser);
+
+  const onProfileUpdated = (e) => {
+    if (e.detail) {
+      Object.assign(currentUser, e.detail);
+      renderUserAvatarAndMeta(currentUser);
+    }
+  };
+  window.addEventListener('profile:updated', onProfileUpdated);
 
   sidebarFooter.append(avatar, userMeta);
   sidebar.append(sidebarTop, sidebarFooter);
@@ -432,11 +484,17 @@ export function renderDashboardLayout(container, { user, activeModule = 'dashboa
       renderConfiguracionModule(mainArea);
     } else if (currentMod.id === 'productos') {
       renderProductosModule(mainArea);
+    } else if (currentMod.id === 'users') {
+      renderUsuariosRolesPage(mainArea);
     } else if (currentMod.id === 'dashboard') {
       renderDashboardSummary(mainArea, onNavigate);
     } else {
       renderModulePlaceholder(mainArea, currentMod);
     }
+
+    // Aplicar automáticamente modo Solo Vista si corresponde
+    const activePermKey = modPermMap[currentMod.id] || currentMod.id;
+    applyViewOnlyMode(mainArea, activePermKey);
   } catch (err) {
     console.error('[Error renderizando módulo]', err);
     mainArea.innerHTML = `

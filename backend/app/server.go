@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"log"
@@ -11,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 
+	"r1/backend/internal/audit"
 	"r1/backend/internal/auth"
 	"r1/backend/internal/db"
 	"r1/backend/internal/handlers"
@@ -34,7 +36,10 @@ func Run() {
 		log.Println("[BD] Conectado exitosamente a MySQL/MariaDB (base de datos: r1personalizados)")
 	}
 
-	authHandler := handlers.NewAuthHandler(dbConn)
+	auditSvc := audit.NewService(dbConn)
+	authHandler := handlers.NewAuthHandler(dbConn, auditSvc)
+	usersHandler := handlers.NewUsersHandler(dbConn, auditSvc)
+	logsHandler := handlers.NewLogsHandler(auditSvc)
 	clientesHandler := handlers.NewClientesHandler(dbConn)
 	proveedoresHandler := handlers.NewProveedoresHandler(dbConn)
 	perfilesMensajesHandler := handlers.NewPerfilesMensajesHandler(dbConn)
@@ -58,64 +63,164 @@ func Run() {
 	registerAuthRoutes("/auth")
 	registerAuthRoutes("/api/auth")
 
-	// Rutas del módulo Clientes
-	mux.HandleFunc("/api/clientes", clientesHandler.HandleCollection)
-	mux.HandleFunc("/api/clientes/", clientesHandler.HandleItem)
+	// Middleware guardián por módulo y método de escritura
+	guard := func(module string, next http.HandlerFunc) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			claims := auth.CurrentUserClaims(r)
+			if claims == nil {
+				// Si no tiene cookie/claims, rechazar con 401
+				auth.WriteJSONError(w, http.StatusUnauthorized, "no autenticado")
+				return
+			}
+			ctx := context.WithValue(r.Context(), auth.UserClaimsKey, claims)
+			r = r.WithContext(ctx)
 
-	// Rutas del módulo Proveedor
-	mux.HandleFunc("/api/proveedores", proveedoresHandler.HandleCollection)
-	mux.HandleFunc("/api/proveedores/", proveedoresHandler.HandleItem)
+			if claims.IsRoot || claims.Role == "admin" {
+				next(w, r)
+				return
+			}
+			access, exists := claims.Permissions[module]
+			if !exists {
+				auth.WriteJSONError(w, http.StatusForbidden, "acceso denegado al módulo")
+				return
+			}
+			isWrite := r.Method == http.MethodPost || r.Method == http.MethodPut || r.Method == http.MethodPatch || r.Method == http.MethodDelete
+			if isWrite && access != "editor" {
+				auth.WriteJSONError(w, http.StatusForbidden, "acceso denegado: modo solo vista (no puede realizar modificaciones)")
+				return
+			}
+			next(w, r)
+		}
+	}
 
-	// Rutas del módulo Perfiles de Mensajes
-	mux.HandleFunc("/api/perfiles-mensajes", perfilesMensajesHandler.HandleCollection)
-	mux.HandleFunc("/api/perfiles-mensajes/", perfilesMensajesHandler.HandleItem)
+	// Rutas de Usuarios y Roles (exclusivo para Administradores y Root)
+	mux.HandleFunc("/api/users", func(w http.ResponseWriter, r *http.Request) {
+		claims := auth.CurrentUserClaims(r)
+		if claims == nil || (!claims.IsRoot && claims.Role != "admin") {
+			auth.WriteJSONError(w, http.StatusForbidden, "acceso denegado: módulo reservado para administradores")
+			return
+		}
+		if r.Method == http.MethodGet {
+			usersHandler.List(w, r)
+		} else if r.Method == http.MethodPost {
+			usersHandler.Create(w, r)
+		} else {
+			auth.WriteJSONError(w, http.StatusMethodNotAllowed, "método no permitido")
+		}
+	})
 
-	// Rutas del módulo Difusión y Mensajes
-	mux.HandleFunc("/api/difusion-mensajes", difusionMensajesHandler.HandleCollection)
-	mux.HandleFunc("/api/difusion-mensajes/", difusionMensajesHandler.HandleItem)
+	mux.HandleFunc("/api/users/", func(w http.ResponseWriter, r *http.Request) {
+		claims := auth.CurrentUserClaims(r)
+		if claims == nil || (!claims.IsRoot && claims.Role != "admin") {
+			auth.WriteJSONError(w, http.StatusForbidden, "acceso denegado: módulo reservado para administradores")
+			return
+		}
+		if r.Method == http.MethodPut || r.Method == http.MethodPatch {
+			usersHandler.Update(w, r)
+		} else if r.Method == http.MethodDelete {
+			usersHandler.Delete(w, r)
+		} else {
+			auth.WriteJSONError(w, http.StatusMethodNotAllowed, "método no permitido")
+		}
+	})
 
-	// Rutas del módulo Sesiones de WhatsApp (navegador headless en segundo plano)
-	mux.HandleFunc("/api/whatsapp/status", whatsappHandler.Status)
-	mux.HandleFunc("/api/whatsapp/start", whatsappHandler.Start)
-	mux.HandleFunc("/api/whatsapp/restart", whatsappHandler.Restart)
-	mux.HandleFunc("/api/whatsapp/stop", whatsappHandler.Stop)
-	mux.HandleFunc("/api/whatsapp/delete-session", whatsappHandler.DeleteSession)
-	mux.HandleFunc("/api/whatsapp/send", whatsappHandler.Send)
+	// Rutas de Logs / Auditoría (exclusivo para Administradores y Root)
+	mux.HandleFunc("/api/logs", func(w http.ResponseWriter, r *http.Request) {
+		claims := auth.CurrentUserClaims(r)
+		if claims == nil || (!claims.IsRoot && claims.Role != "admin") {
+			auth.WriteJSONError(w, http.StatusForbidden, "acceso denegado: logs reservados para administradores")
+			return
+		}
+		logsHandler.List(w, r)
+	})
+
+	mux.HandleFunc("/api/logs/export", func(w http.ResponseWriter, r *http.Request) {
+		claims := auth.CurrentUserClaims(r)
+		if claims == nil || (!claims.IsRoot && claims.Role != "admin") {
+			auth.WriteJSONError(w, http.StatusForbidden, "acceso denegado: logs reservados para administradores")
+			return
+		}
+		logsHandler.Export(w, r)
+	})
+
+	// Rutas protegidas por módulo con soporte para 'viewer' (Solo Vista) vs 'editor'
+	mux.HandleFunc("/api/clientes", guard("clientes", clientesHandler.HandleCollection))
+	mux.HandleFunc("/api/clientes/", guard("clientes", clientesHandler.HandleItem))
+
+	mux.HandleFunc("/api/proveedores", guard("proveedores", proveedoresHandler.HandleCollection))
+	mux.HandleFunc("/api/proveedores/", guard("proveedores", proveedoresHandler.HandleItem))
+
+	mux.HandleFunc("/api/perfiles-mensajes", guard("perfiles-mensajes", perfilesMensajesHandler.HandleCollection))
+	mux.HandleFunc("/api/perfiles-mensajes/", guard("perfiles-mensajes", perfilesMensajesHandler.HandleItem))
+
+	mux.HandleFunc("/api/difusion-mensajes", guard("difusion-mensajes", difusionMensajesHandler.HandleCollection))
+	mux.HandleFunc("/api/difusion-mensajes/", guard("difusion-mensajes", difusionMensajesHandler.HandleItem))
+
+	// Rutas del módulo Sesiones de WhatsApp
+	mux.HandleFunc("/api/whatsapp/status", func(w http.ResponseWriter, r *http.Request) {
+		claims := auth.CurrentUserClaims(r)
+		if claims == nil {
+			auth.WriteJSONError(w, http.StatusUnauthorized, "no autenticado")
+			return
+		}
+		whatsappHandler.Status(w, r)
+	})
+	mux.HandleFunc("/api/whatsapp/start", guard("sesiones-whatsapp", whatsappHandler.Start))
+	mux.HandleFunc("/api/whatsapp/restart", guard("sesiones-whatsapp", whatsappHandler.Restart))
+	mux.HandleFunc("/api/whatsapp/stop", guard("sesiones-whatsapp", whatsappHandler.Stop))
+	mux.HandleFunc("/api/whatsapp/delete-session", guard("sesiones-whatsapp", whatsappHandler.DeleteSession))
+	mux.HandleFunc("/api/whatsapp/send", func(w http.ResponseWriter, r *http.Request) {
+		claims := auth.CurrentUserClaims(r)
+		if claims == nil {
+			auth.WriteJSONError(w, http.StatusUnauthorized, "no autenticado")
+			return
+		}
+		if claims.IsRoot || claims.Role == "admin" {
+			whatsappHandler.Send(w, r)
+			return
+		}
+		perms := claims.Permissions
+		if perms["sesiones-whatsapp"] == "editor" || perms["presupuestos"] == "editor" || perms["pedidos"] == "editor" || perms["difusion-mensajes"] == "editor" {
+			whatsappHandler.Send(w, r)
+			return
+		}
+		auth.WriteJSONError(w, http.StatusForbidden, "acceso denegado para enviar mensajes")
+	})
 	mux.HandleFunc("/api/whatsapp/render-pdf", whatsappHandler.RenderPDF)
 
 	// Rutas del módulo Productos
-	mux.HandleFunc("/api/productos", productosHandler.HandleCollection)
-	mux.HandleFunc("/api/productos/check-sku", productosHandler.HandleCheckSKU)
-	mux.HandleFunc("/api/productos/", productosHandler.HandleItem)
+	mux.HandleFunc("/api/productos", guard("productos", productosHandler.HandleCollection))
+	mux.HandleFunc("/api/productos/check-sku", guard("productos", productosHandler.HandleCheckSKU))
+	mux.HandleFunc("/api/productos/", guard("productos", productosHandler.HandleItem))
 
 	// Rutas del módulo Pedidos
-	mux.HandleFunc("/api/pedidos", pedidosHandler.HandleCollection)
-	mux.HandleFunc("/api/pedidos/", pedidosHandler.HandleItem)
+	mux.HandleFunc("/api/pedidos", guard("pedidos", pedidosHandler.HandleCollection))
+	mux.HandleFunc("/api/pedidos/", guard("pedidos", pedidosHandler.HandleItem))
 
 	// Rutas del módulo Pagos
-	mux.HandleFunc("/api/pagos", pagosHandler.HandleCollection)
-	mux.HandleFunc("/api/pagos/", pagosHandler.HandleItem)
+	mux.HandleFunc("/api/pagos", guard("pagos", pagosHandler.HandleCollection))
+	mux.HandleFunc("/api/pagos/", guard("pagos", pagosHandler.HandleItem))
 
 	// Rutas del módulo Presupuestos y Plantillas PDF
-	mux.HandleFunc("/api/config/budget-template", configuracionHandler.HandleBudgetTemplate)
-	mux.HandleFunc("/api/budgets", budgetsHandler.HandleCollection)
-	mux.HandleFunc("/api/budgets/upload-image", budgetsHandler.HandleUploadImage)
-	mux.HandleFunc("/api/budgets/", budgetsHandler.HandleItem)
+	mux.HandleFunc("/api/config/budget-template", guard("presupuestos", configuracionHandler.HandleBudgetTemplate))
+	mux.HandleFunc("/api/budgets", guard("presupuestos", budgetsHandler.HandleCollection))
+	mux.HandleFunc("/api/budgets/upload-image", guard("presupuestos", budgetsHandler.HandleUploadImage))
+	mux.HandleFunc("/api/budgets/", guard("presupuestos", budgetsHandler.HandleItem))
 
 	// Rutas del módulo Reciclaje
-	mux.HandleFunc("/api/reciclaje", reciclajeHandler.List)
-	mux.HandleFunc("/api/reciclaje/restaurar", reciclajeHandler.Restore)
+	mux.HandleFunc("/api/reciclaje", guard("reciclaje", reciclajeHandler.List))
+	mux.HandleFunc("/api/reciclaje/restaurar", guard("reciclaje", reciclajeHandler.Restore))
 
-	// Rutas del módulo Configuración (WhatsApp, Pedidos, Productos, Perfil, General)
-	mux.HandleFunc("/api/configuracion", configuracionHandler.HandleConfig)
-	mux.HandleFunc("/api/configuracion/perfil", configuracionHandler.HandlePerfil)
-	mux.HandleFunc("/api/configuracion/atributos", configuracionHandler.ListAtributos)
-	mux.HandleFunc("/api/configuracion/categorias", configuracionHandler.HandleCategorias)
-	mux.HandleFunc("/api/configuracion/categorias/", configuracionHandler.HandleCategorias)
-	mux.HandleFunc("/api/configuracion/marcas", configuracionHandler.HandleMarcas)
-	mux.HandleFunc("/api/configuracion/marcas/", configuracionHandler.HandleMarcas)
-	mux.HandleFunc("/api/configuracion/unidades", configuracionHandler.HandleUnidades)
-	mux.HandleFunc("/api/configuracion/unidades/", configuracionHandler.HandleUnidades)
+	// Rutas del módulo Configuración
+	mux.HandleFunc("/api/configuracion", guard("configuracion", configuracionHandler.HandleConfig))
+	mux.HandleFunc("/api/configuracion/perfil", guard("configuracion", configuracionHandler.HandlePerfil))
+	mux.HandleFunc("/api/configuracion/atributos", guard("configuracion", configuracionHandler.ListAtributos))
+	mux.HandleFunc("/api/configuracion/categorias", guard("configuracion", configuracionHandler.HandleCategorias))
+	mux.HandleFunc("/api/configuracion/categorias/", guard("configuracion", configuracionHandler.HandleCategorias))
+	mux.HandleFunc("/api/configuracion/marcas", guard("configuracion", configuracionHandler.HandleMarcas))
+	mux.HandleFunc("/api/configuracion/marcas/", guard("configuracion", configuracionHandler.HandleMarcas))
+	mux.HandleFunc("/api/configuracion/unidades", guard("configuracion", configuracionHandler.HandleUnidades))
+	mux.HandleFunc("/api/configuracion/unidades/", guard("configuracion", configuracionHandler.HandleUnidades))
 
 	frontendDir := resolveDir("frontend", "../frontend")
 	logoDir := resolveDir("logo", "../logo", "frontend/logo")
