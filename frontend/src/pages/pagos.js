@@ -167,10 +167,16 @@ export function renderPagosModule(container) {
     headerBeneficiario: 'todos', // 'todos' | 'Proveedor' | 'Cliente'
     headerEstado: 'todos', // 'todos' | 'Pagado' | 'Pendiente' | 'Pago Parcial'
     headerSemana: 'todas', // 'todas' | number
+    headerDia: '', // '' | 'YYYY-MM-DD'
     page: 1,
     pageSize: 20,
     data: [],
     total: 0,
+    filteredTotals: {
+      montoTotal: 0,
+      montoPagado: 0,
+      saldo: 0,
+    },
     stats: {
       total: 0,
       pendientes: 0,
@@ -373,8 +379,33 @@ export function renderPagosModule(container) {
           </select>
         </div>
 
+        <!-- Filtro Día / Fecha (hasta fecha actual nomás) -->
+        <div class="flex items-center gap-1 bg-slate-50 dark:bg-slate-800 px-2 py-1 rounded-xl border border-slate-200 dark:border-slate-700" title="Seleccione o escriba el día/fecha (hasta hoy)">
+          <i class="fa-solid fa-calendar-day text-brand text-[11px]"></i>
+          <span class="text-[11px] font-semibold text-slate-400">Día:</span>
+          <input type="date" id="filter-dia" value="${escapeHtml(state.headerDia)}" max="${getTodayISODate()}"
+            class="bg-transparent text-xs font-bold text-slate-700 dark:text-slate-200 focus:outline-none cursor-pointer" />
+          ${state.headerDia ? `
+            <button type="button" id="btn-clear-dia" class="text-slate-400 hover:text-danger text-xs px-1 cursor-pointer" title="Quitar filtro de día">
+              <i class="fa-solid fa-xmark"></i>
+            </button>
+          ` : ''}
+        </div>
+
+        <!-- Selector de Paginación / Límite de Vista (hasta 1.000 ítems para ver total de deuda) -->
+        <div class="flex items-center gap-1 bg-slate-50 dark:bg-slate-800 px-2 py-1 rounded-xl border border-slate-200 dark:border-slate-700" title="Cantidad de pagos a visualizar (hasta 1.000 ítems)">
+          <i class="fa-solid fa-table-list text-slate-400 text-[11px]"></i>
+          <span class="text-[11px] font-semibold text-slate-400">Ver:</span>
+          <select id="filter-pagesize" class="bg-transparent text-xs font-bold text-slate-700 dark:text-slate-200 focus:outline-none cursor-pointer">
+            <option value="20" ${state.pageSize === 20 ? 'selected' : ''}>20 (Estándar)</option>
+            <option value="50" ${state.pageSize === 50 ? 'selected' : ''}>50 por pág.</option>
+            <option value="100" ${state.pageSize === 100 ? 'selected' : ''}>100 por pág.</option>
+            <option value="1000" ${state.pageSize === 1000 ? 'selected' : ''}>1.000 ítems (Ver Todo / Deuda)</option>
+          </select>
+        </div>
+
         ${
-          state.search || state.headerBeneficiario !== 'todos' || state.headerEstado !== 'todos' || state.headerSemana !== 'todas'
+          state.search || state.headerBeneficiario !== 'todos' || state.headerEstado !== 'todos' || state.headerSemana !== 'todas' || state.headerDia || state.pageSize !== 20
             ? `
           <button type="button" id="btn-limpiar-filtros" class="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl text-xs font-semibold text-slate-500 hover:text-danger hover:bg-rose-50 dark:hover:bg-rose-950/40 transition cursor-pointer" title="Restablecer filtros">
             <i class="fa-solid fa-rotate-left text-[10px]"></i>
@@ -421,11 +452,33 @@ export function renderPagosModule(container) {
       loadData();
     });
 
+    minimalBar.querySelector('#filter-dia')?.addEventListener('change', (e) => {
+      state.headerDia = e.target.value;
+      state.page = 1;
+      renderMinimalBar();
+      loadData();
+    });
+
+    minimalBar.querySelector('#btn-clear-dia')?.addEventListener('click', () => {
+      state.headerDia = '';
+      state.page = 1;
+      renderMinimalBar();
+      loadData();
+    });
+
+    minimalBar.querySelector('#filter-pagesize')?.addEventListener('change', (e) => {
+      state.pageSize = Number(e.target.value) || 20;
+      state.page = 1;
+      loadData();
+    });
+
     minimalBar.querySelector('#btn-limpiar-filtros')?.addEventListener('click', () => {
       state.search = '';
       state.headerBeneficiario = 'todos';
       state.headerEstado = 'todos';
       state.headerSemana = 'todas';
+      state.headerDia = '';
+      state.pageSize = 20;
       state.page = 1;
       renderMinimalBar();
       loadData();
@@ -439,6 +492,62 @@ export function renderPagosModule(container) {
   // ==========================================================================
   const tableHolder = document.createElement('div');
   moduleWrap.appendChild(tableHolder);
+
+  const totalsHolder = document.createElement('div');
+  totalsHolder.className = 'w-full';
+  moduleWrap.appendChild(totalsHolder);
+
+  function renderTotalsBar() {
+    totalsHolder.innerHTML = `
+      <div class="p-4 sm:p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4 select-none">
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 rounded-xl bg-purple-100 dark:bg-purple-950/60 text-brand flex items-center justify-center text-lg shrink-0">
+            <i class="fa-solid fa-calculator"></i>
+          </div>
+          <div>
+            <h3 class="text-xs sm:text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+              <span>Totales Generales de la Vista</span>
+              <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
+                ${state.total} registro${state.total === 1 ? '' : 's'} ${state.pageSize === 1000 ? '(Vista ampliada 1.000)' : ''}
+              </span>
+            </h3>
+            <p class="text-[11px] text-slate-500 dark:text-slate-400">
+              Monto total, monto abonado y saldo pendiente calculados dinámicamente acorde a los filtros aplicados.
+            </p>
+          </div>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-3 sm:gap-4">
+          <!-- Monto Total -->
+          <div class="p-3 sm:px-4 sm:py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/60 min-w-[140px]">
+            <span class="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">Monto Total</span>
+            <span class="text-sm sm:text-base font-black font-mono text-slate-900 dark:text-white">
+              ${formatGuaranies(state.filteredTotals.montoTotal)}
+            </span>
+          </div>
+
+          <!-- Monto Pagado -->
+          <div class="p-3 sm:px-4 sm:py-2.5 rounded-xl bg-emerald-50/70 dark:bg-emerald-950/30 border border-emerald-200/70 dark:border-emerald-800/40 min-w-[140px]">
+            <span class="text-[10px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 block">Monto Pagado</span>
+            <span class="text-sm sm:text-base font-black font-mono text-emerald-600 dark:text-emerald-400">
+              ${formatGuaranies(state.filteredTotals.montoPagado)}
+            </span>
+          </div>
+
+          <!-- Saldo / Deuda -->
+          <div class="p-3 sm:px-4 sm:py-2.5 rounded-xl bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200/70 dark:border-amber-800/40 min-w-[150px]">
+            <span class="text-[10px] font-bold uppercase tracking-wider text-amber-600 dark:text-amber-400 flex items-center justify-between">
+              <span>Saldo / Deuda</span>
+              <i class="fa-solid fa-triangle-exclamation text-[10px]"></i>
+            </span>
+            <span class="text-sm sm:text-base font-black font-mono text-amber-600 dark:text-amber-400">
+              ${formatGuaranies(state.filteredTotals.saldo)}
+            </span>
+          </div>
+        </div>
+      </div>
+    `;
+  }
 
   function renderTable() {
     tableHolder.innerHTML = '';
@@ -663,11 +772,35 @@ export function renderPagosModule(container) {
         page: String(state.page),
         page_size: String(state.pageSize),
       });
+      if (state.headerDia) {
+        q.set('dia', state.headerDia);
+      }
 
       const res = await apiFetch(`/api/pagos?${q.toString()}`);
       if (res) {
         state.data = Array.isArray(res.data) ? res.data : [];
         state.total = Number(res.total) || 0;
+
+        if (res.filteredTotals) {
+          state.filteredTotals = {
+            montoTotal: Number(res.filteredTotals.montoTotal) || 0,
+            montoPagado: Number(res.filteredTotals.montoPagado) || 0,
+            saldo: Number(res.filteredTotals.saldo) || 0,
+          };
+        } else {
+          let sumTotal = 0, sumPagado = 0, sumSaldo = 0;
+          state.data.forEach((p) => {
+            sumTotal += Number(p.montoTotal) || 0;
+            sumPagado += Number(p.montoPagado) || 0;
+            sumSaldo += Number(p.saldoPendiente) || 0;
+          });
+          state.filteredTotals = {
+            montoTotal: sumTotal,
+            montoPagado: sumPagado,
+            saldo: sumSaldo,
+          };
+        }
+
         if (res.stats) {
           state.stats = {
             total: res.stats.total || 0,
@@ -695,6 +828,7 @@ export function renderPagosModule(container) {
       state.loading = false;
       renderTable();
       renderMinimalBar();
+      renderTotalsBar();
     }
   }
 

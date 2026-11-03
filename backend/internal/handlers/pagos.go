@@ -179,6 +179,15 @@ func (h *PagosHandler) List(w http.ResponseWriter, r *http.Request) {
 			args = append(args, semInt)
 		}
 	}
+	if diaStr := strings.TrimSpace(r.URL.Query().Get("dia")); diaStr != "" && diaStr != "todos" {
+		if len(diaStr) == 10 && strings.Count(diaStr, "-") == 2 {
+			whereClauses = append(whereClauses, "p.fecha_pago = ?")
+			args = append(args, diaStr)
+		} else if dNum, err := strconv.Atoi(diaStr); err == nil && dNum >= 1 && dNum <= 31 {
+			whereClauses = append(whereClauses, "DAY(p.fecha_pago) = ? AND DATE_FORMAT(p.fecha_pago, '%Y-%m') = ?")
+			args = append(args, dNum, currentMonth)
+		}
+	}
 
 	switch filter {
 	case "pendientes":
@@ -301,16 +310,33 @@ func (h *PagosHandler) List(w http.ResponseWriter, r *http.Request) {
 		list = append(list, item)
 	}
 
+	var sumTotal, sumPagado, sumSaldo float64
+	totalsQuery := fmt.Sprintf(`
+		SELECT
+			COALESCE(SUM(p.monto_total), 0),
+			COALESCE(SUM(p.monto_pagado), 0),
+			COALESCE(SUM(p.saldo_pendiente), 0)
+		FROM pagos p
+		LEFT JOIN pedidos ped ON p.pedido_id = ped.id
+		WHERE %s
+	`, whereSQL)
+	_ = h.DB.QueryRowContext(r.Context(), totalsQuery, args...).Scan(&sumTotal, &sumPagado, &sumSaldo)
+
 	stats := h.getStats(r.Context())
 
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	_ = json.NewEncoder(w).Encode(map[string]any{
-		"data":      list,
-		"stats":     stats,
-		"page":      page,
-		"pageSize":  pageSize,
-		"total":     total,
-		"totalPages": (total + pageSize - 1) / pageSize,
+		"data":           list,
+		"stats":          stats,
+		"filteredTotals": map[string]float64{
+			"montoTotal":  sumTotal,
+			"montoPagado": sumPagado,
+			"saldo":       sumSaldo,
+		},
+		"page":           page,
+		"pageSize":       pageSize,
+		"total":          total,
+		"totalPages":     (total + pageSize - 1) / pageSize,
 	})
 }
 
