@@ -1325,6 +1325,7 @@ export function renderDashboardView(container, onNavigate, currentUser) {
     content.className = 'space-y-4 text-xs select-none';
 
     let page = 1;
+    let pageSize = 20;
     let busqueda = initialSearch || '';
     let currentData = null;
 
@@ -1356,15 +1357,41 @@ export function renderDashboardView(container, onNavigate, currentUser) {
         <div class="p-8 text-center text-slate-400">Cargando registros...</div>
       </div>
 
-      <!-- Barra de pie con totales fijos y paginación -->
+      <!-- Barra de pie con totales fijos y paginación estándar -->
       <div id="drill-footer-bar" class="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700 flex flex-wrap items-center justify-between gap-3 font-semibold">
         <div class="flex items-center gap-3">
           <span id="drill-count-badge" class="text-slate-500 dark:text-slate-400 font-mono text-xs">—</span>
           <span id="drill-total-badge" class="font-mono font-black text-brand text-sm">—</span>
         </div>
-        <div id="drill-pagination" class="flex items-center gap-1 text-xs"></div>
+        <div class="flex flex-wrap items-center gap-3">
+          <div class="flex items-center gap-1.5 text-slate-500 dark:text-slate-400 text-xs">
+            <span class="text-[11px] font-normal hidden sm:inline">Mostrar:</span>
+            <select id="drill-sel-pagesize" class="px-2 py-1 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-brand cursor-pointer">
+              <option value="20" selected>20 por pág.</option>
+              <option value="50">50 por pág.</option>
+              <option value="100">100 por pág.</option>
+              <option value="500">500 por pág.</option>
+              <option value="1000">1000 (Ver Todo)</option>
+            </select>
+          </div>
+          <div id="drill-pagination" class="flex items-center gap-1 text-xs"></div>
+        </div>
       </div>
     `;
+
+    function buildPageNumbers(curr, total) {
+      if (total <= 7) {
+        return Array.from({ length: total }, (_, i) => i + 1);
+      }
+      const pages = [1];
+      if (curr > 3) pages.push('...');
+      const start = Math.max(2, curr - 1);
+      const end = Math.min(total - 1, curr + 1);
+      for (let i = start; i <= end; i++) pages.push(i);
+      if (curr < total - 2) pages.push('...');
+      pages.push(total);
+      return pages;
+    }
 
     async function fetchDrilldownData() {
       const box = content.querySelector('#drill-table-box');
@@ -1378,7 +1405,7 @@ export function renderDashboardView(container, onNavigate, currentUser) {
           estado: state.filters.estado,
           busqueda: busqueda,
           pagina: String(page),
-          tamanoPagina: '20',
+          tamanoPagina: String(pageSize),
         });
         if (tipoFiltro) q.set('tipo_filtro', tipoFiltro);
 
@@ -1397,7 +1424,10 @@ export function renderDashboardView(container, onNavigate, currentUser) {
       const totalRegs = res?.totalRegistros || 0;
       const totalMonto = res?.totalMonto || 0;
 
-      content.querySelector('#drill-count-badge').textContent = `${totalRegs} registro${totalRegs === 1 ? '' : 's'}`;
+      const from = totalRegs > 0 ? (page - 1) * pageSize + 1 : 0;
+      const to = Math.min(page * pageSize, totalRegs);
+      content.querySelector('#drill-count-badge').textContent = `Mostrando ${from}–${to} de ${totalRegs} registro${totalRegs === 1 ? '' : 's'}`;
+
       if (tarjeta.includes('mensajes')) {
         content.querySelector('#drill-total-badge').textContent = '';
       } else if (tarjeta === 'clientes_deuda') {
@@ -1408,32 +1438,58 @@ export function renderDashboardView(container, onNavigate, currentUser) {
 
       const pagerEl = content.querySelector('#drill-pagination');
       pagerEl.innerHTML = '';
-      const totalPages = Math.max(1, Math.ceil(totalRegs / 20));
-      if (totalPages > 1) {
-        const btnPrev = document.createElement('button');
-        btnPrev.className = 'px-2 py-1 rounded bg-white dark:bg-slate-700 border text-slate-600 dark:text-slate-300 disabled:opacity-40 cursor-pointer';
-        btnPrev.innerHTML = '<i class="fa-solid fa-chevron-left"></i>';
-        btnPrev.disabled = page <= 1;
-        btnPrev.onclick = () => {
+      const totalPages = Math.max(1, Math.ceil(totalRegs / pageSize));
+
+      const btnPrev = document.createElement('button');
+      btnPrev.type = 'button';
+      btnPrev.className = 'px-2.5 py-1 rounded-lg bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 text-slate-700 dark:text-slate-200 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer text-xs font-bold transition';
+      btnPrev.innerHTML = '<i class="fa-solid fa-chevron-left text-[10px] mr-1"></i>Anterior';
+      btnPrev.disabled = page <= 1;
+      btnPrev.onclick = () => {
+        if (page > 1) {
           page--;
           fetchDrilldownData();
-        };
+        }
+      };
+      pagerEl.appendChild(btnPrev);
 
-        const spanPage = document.createElement('span');
-        spanPage.className = 'px-2 font-mono';
-        spanPage.textContent = `${page} / ${totalPages}`;
+      buildPageNumbers(page, totalPages).forEach((p) => {
+        if (p === '...') {
+          const dots = document.createElement('span');
+          dots.className = 'px-1.5 text-slate-400 font-bold';
+          dots.textContent = '…';
+          pagerEl.appendChild(dots);
+        } else {
+          const btnP = document.createElement('button');
+          btnP.type = 'button';
+          btnP.className = `px-2.5 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
+            p === page
+              ? 'bg-brand text-white shadow-2xs'
+              : 'bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-600'
+          }`;
+          btnP.textContent = String(p);
+          btnP.onclick = () => {
+            if (page !== p) {
+              page = p;
+              fetchDrilldownData();
+            }
+          };
+          pagerEl.appendChild(btnP);
+        }
+      });
 
-        const btnNext = document.createElement('button');
-        btnNext.className = 'px-2 py-1 rounded bg-white dark:bg-slate-700 border text-slate-600 dark:text-slate-300 disabled:opacity-40 cursor-pointer';
-        btnNext.innerHTML = '<i class="fa-solid fa-chevron-right"></i>';
-        btnNext.disabled = page >= totalPages;
-        btnNext.onclick = () => {
+      const btnNext = document.createElement('button');
+      btnNext.type = 'button';
+      btnNext.className = 'px-2.5 py-1 rounded-lg bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 text-slate-700 dark:text-slate-200 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer text-xs font-bold transition';
+      btnNext.innerHTML = 'Siguiente<i class="fa-solid fa-chevron-right text-[10px] ml-1"></i>';
+      btnNext.disabled = page >= totalPages;
+      btnNext.onclick = () => {
+        if (page < totalPages) {
           page++;
           fetchDrilldownData();
-        };
-
-        pagerEl.append(btnPrev, spanPage, btnNext);
-      }
+        }
+      };
+      pagerEl.appendChild(btnNext);
 
       if (filas.length === 0) {
         box.innerHTML = `
@@ -1725,6 +1781,13 @@ export function renderDashboardView(container, onNavigate, currentUser) {
       a.click();
       document.body.removeChild(a);
       toast.success('Descargando archivo CSV con todo el conjunto filtrado...');
+    });
+
+    // Selector de tamaño de página
+    content.querySelector('#drill-sel-pagesize')?.addEventListener('change', (e) => {
+      pageSize = parseInt(e.target.value, 10) || 20;
+      page = 1;
+      fetchDrilldownData();
     });
 
     // Botón Ver en módulo completo

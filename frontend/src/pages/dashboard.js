@@ -14,7 +14,7 @@ import { renderPedidosModule } from './pedidos.js?v=20261103_3';
 import { renderPagosModule } from './pagos.js?v=20261102_18';
 import { renderPresupuestosModule } from './presupuestos.js?v=20261102_16';
 import { renderUsuariosRolesPage } from './usuarios-roles.js?v=20261102_11';
-import { renderDashboardView } from './dashboard-view.js?v=20261103_8';
+import { renderDashboardView } from './dashboard-view.js?v=20261103_9';
 import { applyViewOnlyMode } from '../services/permissions.service.js?v=20261102_11';
 import {
   subscribeQueue,
