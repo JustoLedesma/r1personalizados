@@ -111,11 +111,19 @@ export function renderPedidosModule(container) {
     // Filtros de listado
     filters: {
       q: '',
-      estado: '', // '' = Todos, 'Creado', 'En Producción', 'En Pausa', 'Listo', 'Cancelado'
-      financiero: 'todos', // 'todos', 'cobros_hoy', 'cobros_semanales', 'cobros_mes', 'pagos_pendientes', 'saldos_pendientes'
+      tipo: 'todos', // 'todos' | 'Contado' | 'Credito'
+      estado: 'todos', // 'todos' | 'Creado' | 'En Producción' | 'En Pausa' | 'Listo' | 'Cancelado'
+      semana: 'todas', // 'todas' | 1..52
       semanas: [], // Array de números de semana seleccionadas (Ctrl para selección múltiple)
+      dia: '', // YYYY-MM-DD
+      financiero: 'todos', // 'todos', 'cobros_hoy', 'cobros_semanales', 'cobros_mes', 'pagos_pendientes', 'saldos_pendientes'
       page: 1,
       pageSize: 20,
+    },
+    filteredTotals: {
+      montoTotal: 0,
+      montoPagado: 0,
+      saldo: 0,
     },
     totalSemanasAnio: 52,
     anioActual: new Date().getFullYear(),
@@ -184,10 +192,22 @@ export function renderPedidosModule(container) {
     try {
       const params = new URLSearchParams();
       if (state.filters.q) params.set('q', state.filters.q);
-      if (state.filters.estado) params.set('estado', state.filters.estado);
-      if (state.filters.financiero) params.set('financiero', state.filters.financiero);
-      if (Array.isArray(state.filters.semanas) && state.filters.semanas.length > 0) {
+      if (state.filters.tipo && state.filters.tipo !== 'todos') {
+        params.set('tipo', state.filters.tipo);
+      }
+      if (state.filters.estado && state.filters.estado !== 'todos') {
+        params.set('estado', state.filters.estado);
+      }
+      if (state.filters.semana && state.filters.semana !== 'todas') {
+        params.set('semana', state.filters.semana);
+      } else if (Array.isArray(state.filters.semanas) && state.filters.semanas.length > 0) {
         params.set('semanas', state.filters.semanas.join(','));
+      }
+      if (state.filters.dia) {
+        params.set('dia', state.filters.dia);
+      }
+      if (state.filters.financiero && state.filters.financiero !== 'todos') {
+        params.set('financiero', state.filters.financiero);
       }
       params.set('page', String(state.filters.page));
       params.set('page_size', String(state.filters.pageSize));
@@ -197,6 +217,27 @@ export function renderPedidosModule(container) {
         state.items = Array.isArray(res.data) ? res.data : [];
         state.total = Number(res.total) || 0;
         if (res.stats) state.stats = res.stats;
+        if (res.filteredTotals) {
+          state.filteredTotals = {
+            montoTotal: Number(res.filteredTotals.montoTotal) || 0,
+            montoPagado: Number(res.filteredTotals.montoPagado) || 0,
+            saldo: Number(res.filteredTotals.saldo) || 0,
+          };
+        } else {
+          let sumTotal = 0;
+          let sumPagado = 0;
+          let sumSaldo = 0;
+          state.items.forEach((p) => {
+            sumTotal += Number(p.montoTotal) || 0;
+            sumPagado += Number(p.montoPagado) || 0;
+            sumSaldo += Number(p.saldoPendiente) || 0;
+          });
+          state.filteredTotals = {
+            montoTotal: sumTotal,
+            montoPagado: sumPagado,
+            saldo: sumSaldo,
+          };
+        }
         if (res.fechaHoy) state.fechaHoy = res.fechaHoy;
         if (res.semanaActual) state.semanaActual = res.semanaActual;
         if (res.totalSemanasAnio) state.totalSemanasAnio = res.totalSemanasAnio;
@@ -391,6 +432,7 @@ export function renderPedidosModule(container) {
         size: 'sm',
         onClick: () => {
           state.filters.semanas = [];
+          state.filters.semana = 'todas';
           state.filters.page = 1;
           fetchPedidos();
         },
@@ -491,6 +533,11 @@ export function renderPedidosModule(container) {
           }
 
           state.filters.semanas = Array.from(currentSet).sort((a, b) => a - b);
+          if (currentSet.size === 1) {
+            state.filters.semana = String(Array.from(currentSet)[0]);
+          } else {
+            state.filters.semana = 'todas';
+          }
           state.filters.page = 1;
           fetchPedidos();
         });
@@ -564,7 +611,9 @@ export function renderPedidosModule(container) {
 
     countersData.forEach((cd) => {
       const card = document.createElement('div');
-      const isCardActive = state.filters.estado === cd.id;
+      const isCardActive =
+        state.filters.estado === cd.id ||
+        ((!state.filters.estado || state.filters.estado === 'todos') && cd.id === '');
       card.className = `p-4 rounded-2xl bg-white dark:bg-slate-900 border transition cursor-pointer shadow-xs select-none ${
         isCardActive
           ? 'border-brand ring-2 ring-brand/30 dark:border-brand'
@@ -578,7 +627,7 @@ export function renderPedidosModule(container) {
         <p class="text-xl sm:text-2xl font-black text-slate-900 dark:text-white">${cd.count}</p>
       `;
       card.addEventListener('click', () => {
-        state.filters.estado = cd.id;
+        state.filters.estado = cd.id ? cd.id : 'todos';
         state.filters.page = 1;
         fetchPedidos();
       });
@@ -587,26 +636,102 @@ export function renderPedidosModule(container) {
 
     parent.appendChild(cardsGrid);
 
-    // 4. Barra de búsqueda y título de lista
-    const tableHeaderCard = document.createElement('div');
-    tableHeaderCard.className =
-      'p-4 rounded-t-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 border-b-0 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs';
+    // 4. Barra de filtros minimalista (estilo idéntico a Pagos)
+    const minimalBar = document.createElement('div');
+    minimalBar.className =
+      'p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs flex flex-wrap items-center justify-between gap-3 select-none';
 
-    const listTitle = document.createElement('h3');
-    listTitle.className = 'text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2';
-    listTitle.innerHTML = `<i class="fa-solid fa-list-check text-brand"></i><span>Lista de Pedidos</span>`;
+    minimalBar.innerHTML = `
+      <div class="flex flex-wrap items-center gap-2.5 flex-1 min-w-[280px]">
+        <!-- Buscador minimalista -->
+        <div class="relative w-full sm:w-64">
+          <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs"></i>
+          <input type="text" id="pedidos-search-inp" value="${escapeHtml(state.filters.q)}"
+            placeholder="Buscar por N°, cliente, producto..."
+            class="w-full pl-8 pr-3 py-1.5 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-brand" />
+        </div>
 
-    const searchWrap = document.createElement('div');
-    searchWrap.className = 'relative w-full sm:max-w-md';
-    searchWrap.innerHTML = `
-      <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 text-xs"></i>
-      <input type="text" id="pedido-search-input" value="${escapeHtml(state.filters.q)}"
-        placeholder="Buscar por N° pedido, cliente o teléfono..."
-        class="w-full pl-9 pr-3.5 py-2 text-xs sm:text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/60 dark:bg-slate-800/50 text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-brand" />
+        <!-- Filtro Tipo / Condición -->
+        <div class="flex items-center gap-1 bg-slate-50 dark:bg-slate-800 px-2 py-1 rounded-xl border border-slate-200 dark:border-slate-700">
+          <span class="text-[11px] font-semibold text-slate-400">Tipo:</span>
+          <select id="filter-tipo" class="bg-transparent text-xs font-bold text-slate-700 dark:text-slate-200 focus:outline-none cursor-pointer">
+            <option value="todos" ${state.filters.tipo === 'todos' ? 'selected' : ''}>Todos</option>
+            <option value="Contado" ${state.filters.tipo === 'Contado' ? 'selected' : ''}>Contado</option>
+            <option value="Credito" ${state.filters.tipo === 'Credito' ? 'selected' : ''}>Crédito</option>
+          </select>
+        </div>
+
+        <!-- Filtro Estado -->
+        <div class="flex items-center gap-1 bg-slate-50 dark:bg-slate-800 px-2 py-1 rounded-xl border border-slate-200 dark:border-slate-700">
+          <span class="text-[11px] font-semibold text-slate-400">Estado:</span>
+          <select id="filter-estado" class="bg-transparent text-xs font-bold text-slate-700 dark:text-slate-200 focus:outline-none cursor-pointer">
+            <option value="todos" ${state.filters.estado === 'todos' ? 'selected' : ''}>Todos</option>
+            <option value="Creado" ${state.filters.estado === 'Creado' ? 'selected' : ''}>Creados</option>
+            <option value="En Producción" ${state.filters.estado === 'En Producción' ? 'selected' : ''}>En Producción</option>
+            <option value="En Pausa" ${state.filters.estado === 'En Pausa' ? 'selected' : ''}>En Pausa</option>
+            <option value="Listo" ${state.filters.estado === 'Listo' ? 'selected' : ''}>Listos</option>
+            <option value="Cancelado" ${state.filters.estado === 'Cancelado' ? 'selected' : ''}>Cancelados</option>
+          </select>
+        </div>
+
+        <!-- Filtro Semana -->
+        <div class="flex items-center gap-1 bg-slate-50 dark:bg-slate-800 px-2 py-1 rounded-xl border border-slate-200 dark:border-slate-700">
+          <span class="text-[11px] font-semibold text-slate-400">Semana:</span>
+          <select id="filter-semana" class="bg-transparent text-xs font-bold text-slate-700 dark:text-slate-200 focus:outline-none cursor-pointer">
+            <option value="todas" ${state.filters.semana === 'todas' ? 'selected' : ''}>Todas</option>
+            ${Array.from({ length: 52 }, (_, i) => i + 1).map((s) => `
+              <option value="${s}" ${String(state.filters.semana) === String(s) ? 'selected' : ''}>Semana ${s}</option>
+            `).join('')}
+          </select>
+        </div>
+
+        <!-- Filtro Día / Fecha (hasta fecha actual nomás) -->
+        <div class="flex items-center gap-1 bg-slate-50 dark:bg-slate-800 px-2 py-1 rounded-xl border border-slate-200 dark:border-slate-700" title="Seleccione o escriba el día/fecha (hasta hoy)">
+          <i class="fa-solid fa-calendar-day text-brand text-[11px]"></i>
+          <span class="text-[11px] font-semibold text-slate-400">Día:</span>
+          <input type="date" id="filter-dia" value="${escapeHtml(state.filters.dia)}" max="${getTodayIsoDate()}"
+            class="bg-transparent text-xs font-bold text-slate-700 dark:text-slate-200 focus:outline-none cursor-pointer" />
+          ${state.filters.dia ? `
+            <button type="button" id="btn-clear-dia" class="text-slate-400 hover:text-danger text-xs px-1 cursor-pointer" title="Quitar filtro de día">
+              <i class="fa-solid fa-xmark"></i>
+            </button>
+          ` : ''}
+        </div>
+
+        <!-- Selector de Paginación / Límite de Vista (hasta 1.000 ítems para ver total de deuda) -->
+        <div class="flex items-center gap-1 bg-slate-50 dark:bg-slate-800 px-2 py-1 rounded-xl border border-slate-200 dark:border-slate-700" title="Cantidad de pedidos a visualizar (hasta 1.000 ítems)">
+          <i class="fa-solid fa-table-list text-slate-400 text-[11px]"></i>
+          <span class="text-[11px] font-semibold text-slate-400">Ver:</span>
+          <select id="filter-pagesize" class="bg-transparent text-xs font-bold text-slate-700 dark:text-slate-200 focus:outline-none cursor-pointer">
+            <option value="20" ${state.filters.pageSize === 20 ? 'selected' : ''}>20 (Estándar)</option>
+            <option value="50" ${state.filters.pageSize === 50 ? 'selected' : ''}>50 por pág.</option>
+            <option value="100" ${state.filters.pageSize === 100 ? 'selected' : ''}>100 por pág.</option>
+            <option value="1000" ${state.filters.pageSize === 1000 ? 'selected' : ''}>1.000 ítems (Ver Todo / Deuda)</option>
+          </select>
+        </div>
+
+        ${
+          state.filters.q || state.filters.tipo !== 'todos' || state.filters.estado !== 'todos' || state.filters.semana !== 'todas' || state.filters.semanas.length > 0 || state.filters.dia || state.filters.financiero !== 'todos' || state.filters.pageSize !== 20
+            ? `
+          <button type="button" id="btn-limpiar-filtros" class="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl text-xs font-semibold text-slate-500 hover:text-danger hover:bg-rose-50 dark:hover:bg-rose-950/40 transition cursor-pointer" title="Restablecer filtros">
+            <i class="fa-solid fa-rotate-left text-[10px]"></i>
+            <span>Limpiar</span>
+          </button>
+        `
+            : ''
+        }
+      </div>
+
+      <!-- Resumen contador -->
+      <div class="flex items-center gap-2 text-slate-400 text-xs shrink-0 font-mono">
+        <i class="fa-solid fa-table text-slate-400 text-[11px]"></i>
+        <span>${state.total} registro${state.total === 1 ? '' : 's'}</span>
+      </div>
     `;
-    const searchInput = searchWrap.querySelector('#pedido-search-input');
+
+    const searchInput = minimalBar.querySelector('#pedidos-search-inp');
     let searchDebounce = null;
-    searchInput.addEventListener('input', (e) => {
+    searchInput?.addEventListener('input', (e) => {
       clearTimeout(searchDebounce);
       searchDebounce = setTimeout(() => {
         state.filters.q = e.target.value;
@@ -615,12 +740,73 @@ export function renderPedidosModule(container) {
       }, 350);
     });
 
-    tableHeaderCard.append(listTitle, searchWrap);
+    minimalBar.querySelector('#filter-tipo')?.addEventListener('change', (e) => {
+      state.filters.tipo = e.target.value;
+      state.filters.page = 1;
+      fetchPedidos();
+    });
+
+    minimalBar.querySelector('#filter-estado')?.addEventListener('change', (e) => {
+      state.filters.estado = e.target.value;
+      state.filters.page = 1;
+      fetchPedidos();
+    });
+
+    minimalBar.querySelector('#filter-semana')?.addEventListener('change', (e) => {
+      state.filters.semana = e.target.value;
+      state.filters.semanas = e.target.value !== 'todas' ? [Number(e.target.value)] : [];
+      state.filters.page = 1;
+      fetchPedidos();
+    });
+
+    minimalBar.querySelector('#filter-dia')?.addEventListener('change', (e) => {
+      state.filters.dia = e.target.value;
+      state.filters.page = 1;
+      fetchPedidos();
+    });
+
+    minimalBar.querySelector('#btn-clear-dia')?.addEventListener('click', () => {
+      state.filters.dia = '';
+      state.filters.page = 1;
+      fetchPedidos();
+    });
+
+    minimalBar.querySelector('#filter-pagesize')?.addEventListener('change', (e) => {
+      state.filters.pageSize = Number(e.target.value) || 20;
+      state.filters.page = 1;
+      fetchPedidos();
+    });
+
+    minimalBar.querySelector('#btn-limpiar-filtros')?.addEventListener('click', () => {
+      state.filters.q = '';
+      state.filters.tipo = 'todos';
+      state.filters.estado = 'todos';
+      state.filters.semana = 'todas';
+      state.filters.semanas = [];
+      state.filters.dia = '';
+      state.filters.financiero = 'todos';
+      state.filters.pageSize = 20;
+      state.filters.page = 1;
+      fetchPedidos();
+    });
+
+    parent.appendChild(minimalBar);
 
     // 5. Tabla de Pedidos
     const tableWrap = document.createElement('div');
     tableWrap.className =
-      'w-full bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-b-2xl overflow-hidden shadow-xs';
+      'w-full bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl overflow-hidden shadow-xs';
+
+    const tableHeader = document.createElement('div');
+    tableHeader.className =
+      'px-5 py-3.5 border-b border-slate-100 dark:border-slate-800/80 flex items-center justify-between bg-slate-50/40 dark:bg-slate-800/20';
+    tableHeader.innerHTML = `
+      <h3 class="text-xs sm:text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+        <i class="fa-solid fa-list-check text-brand"></i>
+        <span>Lista de Pedidos</span>
+      </h3>
+    `;
+    tableWrap.appendChild(tableHeader);
 
     const overflowBox = document.createElement('div');
     overflowBox.className = 'w-full overflow-x-auto';
@@ -640,9 +826,20 @@ export function renderPedidosModule(container) {
         <th class="px-4 py-3 select-none text-left">Pago</th>
         <th class="px-4 py-3 select-none text-left">Pagado / Saldo</th>
         <th class="px-4 py-3 select-none text-left">Progreso</th>
-        <th class="px-4 py-3 select-none text-right">Acciones</th>
+        <th class="px-4 py-3 select-none text-right">
+          <div class="flex items-center justify-end gap-1.5 select-none">
+            <span>Acciones</span>
+            <button type="button" id="btn-export-pedidos" class="inline-flex items-center justify-center w-7 h-7 rounded-lg text-brand hover:text-white hover:bg-brand active:bg-brand-active border border-brand/30 transition shadow-2xs cursor-pointer ml-1" title="Descargar / Exportar reporte de pedidos">
+              <i class="fa-solid fa-download text-xs"></i>
+            </button>
+          </div>
+        </th>
       </tr>
     `;
+    thead.querySelector('#btn-export-pedidos')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openExportPedidosModal();
+    });
     table.appendChild(thead);
 
     const tbody = document.createElement('tbody');
@@ -923,7 +1120,60 @@ export function renderPedidosModule(container) {
       tableWrap.appendChild(pager);
     }
 
-    parent.append(tableHeaderCard, tableWrap);
+    parent.appendChild(tableWrap);
+
+    // 6. Barra inferior de Totales Generales de la Vista (Costo Total, Monto Pagado, Saldo Pendiente)
+    const totalsCard = document.createElement('div');
+    totalsCard.className =
+      'p-4 sm:p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4 select-none';
+    totalsCard.innerHTML = `
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-xl bg-purple-100 dark:bg-purple-950/60 text-brand flex items-center justify-center text-lg shrink-0">
+          <i class="fa-solid fa-calculator"></i>
+        </div>
+        <div>
+          <h3 class="text-xs sm:text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+            <span>Totales Generales de la Vista</span>
+            <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
+              ${state.total} registro${state.total === 1 ? '' : 's'} ${state.filters.pageSize === 1000 ? '(Vista ampliada 1.000)' : ''}
+            </span>
+          </h3>
+          <p class="text-[11px] text-slate-500 dark:text-slate-400">
+            Costo total, lo que ya se pagó y saldo pendiente calculados dinámicamente acorde a los filtros aplicados.
+          </p>
+        </div>
+      </div>
+
+      <div class="flex flex-wrap items-center gap-3 sm:gap-4">
+        <!-- Costo Total -->
+        <div class="p-3 sm:px-4 sm:py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/60 min-w-[140px]">
+          <span class="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">Costo Total</span>
+          <span class="text-sm sm:text-base font-black font-mono text-slate-900 dark:text-white">
+            ${formatGuaranies(state.filteredTotals.montoTotal)}
+          </span>
+        </div>
+
+        <!-- Monto Pagado -->
+        <div class="p-3 sm:px-4 sm:py-2.5 rounded-xl bg-emerald-50/70 dark:bg-emerald-950/30 border border-emerald-200/70 dark:border-emerald-800/40 min-w-[140px]">
+          <span class="text-[10px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 block">Monto Pagado</span>
+          <span class="text-sm sm:text-base font-black font-mono text-emerald-600 dark:text-emerald-400">
+            ${formatGuaranies(state.filteredTotals.montoPagado)}
+          </span>
+        </div>
+
+        <!-- Saldo Pendiente -->
+        <div class="p-3 sm:px-4 sm:py-2.5 rounded-xl bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200/70 dark:border-amber-800/40 min-w-[150px]">
+          <span class="text-[10px] font-bold uppercase tracking-wider text-amber-600 dark:text-amber-400 flex items-center justify-between">
+            <span>Saldo Pendiente</span>
+            <i class="fa-solid fa-triangle-exclamation text-[10px]"></i>
+          </span>
+          <span class="text-sm sm:text-base font-black font-mono text-amber-600 dark:text-amber-400">
+            ${formatGuaranies(state.filteredTotals.saldo)}
+          </span>
+        </div>
+      </div>
+    `;
+    parent.appendChild(totalsCard);
   }
 
   // Menú desplegable del botón de Progreso en la tabla de pedidos
@@ -3665,6 +3915,367 @@ export function renderPedidosModule(container) {
     detailGrid.append(leftCol, rightCol);
     pageWrap.appendChild(detailGrid);
     parent.appendChild(pageWrap);
+  }
+
+  // ==========================================================================
+  // MODAL DE DESCARGA / EXPORTACIÓN DE PEDIDOS (EXCEL, PDF, WORD, TXT)
+  // ==========================================================================
+  function openExportPedidosModal() {
+    let scope = 'actual'; // 'actual' | 'total'
+    let format = 'excel'; // 'excel' | 'pdf' | 'word' | 'txt'
+
+    const availableColumns = [
+      { id: 'numeroPedido', label: 'N° Pedido', default: true, getValue: (r) => r.numeroPedido },
+      { id: 'fechaPedido', label: 'Fecha del Pedido', default: true, getValue: (r) => formatDateOnly(r.fechaPedido || r.createdAt) },
+      { id: 'semanaIso', label: 'Semana ISO', default: true, getValue: (r) => `Semana ${r.semanaIso}` },
+      { id: 'clienteNombre', label: 'Cliente', default: true, getValue: (r) => r.clienteNombre || '—' },
+      { id: 'clienteDocumento', label: 'Documento / RUC', default: true, getValue: (r) => r.clienteDocumento || '—' },
+      { id: 'clienteTelefono', label: 'Teléfono', default: true, getValue: (r) => r.clienteTelefono || '—' },
+      { id: 'clienteDireccion', label: 'Dirección', default: false, getValue: (r) => r.clienteDireccion || '—' },
+      {
+        id: 'productos',
+        label: 'Productos / Ítems',
+        default: true,
+        getValue: (r) => {
+          if (Array.isArray(r.items) && r.items.length > 0) {
+            return r.items.map((it) => `${it.cantidad}x ${it.nombreProducto || it.nombre_producto || ''}`).join(', ');
+          }
+          return '—';
+        },
+      },
+      { id: 'condicionVenta', label: 'Condición de Venta', default: true, getValue: (r) => r.condicionVenta || 'Contado' },
+      { id: 'tipoPago', label: 'Tipo de Pago', default: false, getValue: (r) => r.tipoPago || '—' },
+      { id: 'fechaCobro', label: 'Fecha de Cobro', default: false, getValue: (r) => (r.fechaCobro ? formatDateOnly(r.fechaCobro) : '—') },
+      { id: 'montoTotal', label: 'Costo Total (Gs.)', default: true, isMoney: true, getValue: (r) => formatGuaranies(r.montoTotal) },
+      { id: 'montoPagado', label: 'Monto Pagado (Gs.)', default: true, isMoney: true, getValue: (r) => formatGuaranies(r.montoPagado) },
+      { id: 'saldoPendiente', label: 'Saldo Pendiente (Gs.)', default: true, isMoney: true, getValue: (r) => formatGuaranies(r.saldoPendiente) },
+      { id: 'modalidadEntrega', label: 'Modalidad de Entrega', default: true, getValue: (r) => r.modalidadEntrega || 'Retiro en Local' },
+      { id: 'estado', label: 'Estado / Progreso', default: true, getValue: (r) => r.estado || 'Creado' },
+      { id: 'notasProduccion', label: 'Notas de Producción', default: false, getValue: (r) => r.notasProduccion || '' },
+    ];
+
+    const content = document.createElement('div');
+    content.className = 'space-y-4 text-xs';
+
+    content.innerHTML = `
+      <!-- 1. Alcance de la descarga -->
+      <div class="space-y-1.5">
+        <label class="block text-xs font-bold text-slate-700 dark:text-slate-300">Alcance de la Descarga</label>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <label class="flex items-center gap-2 p-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:border-brand/40 cursor-pointer">
+            <input type="radio" name="export-scope" value="actual" checked class="text-brand focus:ring-brand" />
+            <div>
+              <p class="font-bold text-slate-800 dark:text-slate-100">Vista Actual Filtrada</p>
+              <p class="text-[11px] text-slate-400">Registros mostrados actualmente (${state.items.length} ítems)</p>
+            </div>
+          </label>
+          <label class="flex items-center gap-2 p-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:border-brand/40 cursor-pointer">
+            <input type="radio" name="export-scope" value="total" class="text-brand focus:ring-brand" />
+            <div>
+              <p class="font-bold text-slate-800 dark:text-slate-100">Toda la Tabla General</p>
+              <p class="text-[11px] text-slate-400">Histórico completo de la base de datos (${state.stats?.total || state.total} ítems)</p>
+            </div>
+          </label>
+        </div>
+      </div>
+
+      <!-- 2. Formato de descarga -->
+      <div class="space-y-1.5">
+        <label class="block text-xs font-bold text-slate-700 dark:text-slate-300">Formato del Archivo</label>
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          <button type="button" data-format="excel" class="export-format-btn p-3 rounded-xl border transition flex flex-col items-center gap-1.5 cursor-pointer bg-brand text-white border-brand shadow-xs">
+            <i class="fa-solid fa-file-excel text-base"></i>
+            <span class="font-bold text-xs">Excel (.csv)</span>
+          </button>
+          <button type="button" data-format="pdf" class="export-format-btn p-3 rounded-xl border transition flex flex-col items-center gap-1.5 cursor-pointer border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+            <i class="fa-solid fa-file-pdf text-base"></i>
+            <span class="font-bold text-xs">PDF (.pdf)</span>
+          </button>
+          <button type="button" data-format="word" class="export-format-btn p-3 rounded-xl border transition flex flex-col items-center gap-1.5 cursor-pointer border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+            <i class="fa-solid fa-file-word text-base"></i>
+            <span class="font-bold text-xs">Word (.doc)</span>
+          </button>
+          <button type="button" data-format="txt" class="export-format-btn p-3 rounded-xl border transition flex flex-col items-center gap-1.5 cursor-pointer border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+            <i class="fa-solid fa-file-lines text-base"></i>
+            <span class="font-bold text-xs">Texto (.txt)</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- 3. Selección de campos a descargar -->
+      <div class="space-y-2">
+        <div class="flex items-center justify-between pb-1 border-b border-slate-200 dark:border-slate-700">
+          <label class="block text-xs font-bold text-slate-700 dark:text-slate-300">Campos a Incluir en el Archivo</label>
+          <div class="flex items-center gap-2">
+            <button type="button" id="btn-select-all-cols" class="text-[11px] font-semibold text-brand hover:underline cursor-pointer">Seleccionar todos</button>
+            <span class="text-slate-300 dark:text-slate-600">·</span>
+            <button type="button" id="btn-unselect-all-cols" class="text-[11px] font-semibold text-slate-400 hover:text-danger cursor-pointer">Deseleccionar</button>
+          </div>
+        </div>
+        <div class="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-48 overflow-y-auto p-1 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-200/80 dark:border-slate-700/80">
+          ${availableColumns
+            .map(
+              (c) => `
+            <label class="flex items-center gap-2 p-1.5 rounded-lg hover:bg-white dark:hover:bg-slate-700/60 cursor-pointer">
+              <input type="checkbox" data-col="${c.id}" ${c.default ? 'checked' : ''} class="col-checkbox rounded text-brand focus:ring-brand" />
+              <span class="text-[11px] text-slate-700 dark:text-slate-200 select-none">${escapeHtml(c.label)}</span>
+            </label>
+          `
+            )
+            .join('')}
+        </div>
+      </div>
+    `;
+
+    // Selección de formato
+    content.querySelectorAll('.export-format-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        format = btn.dataset.format;
+        content.querySelectorAll('.export-format-btn').forEach((b) => {
+          if (b.dataset.format === format) {
+            b.className =
+              'export-format-btn p-3 rounded-xl border transition flex flex-col items-center gap-1.5 cursor-pointer bg-brand text-white border-brand shadow-xs';
+          } else {
+            b.className =
+              'export-format-btn p-3 rounded-xl border transition flex flex-col items-center gap-1.5 cursor-pointer border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300';
+          }
+        });
+      });
+    });
+
+    // Selección de alcance
+    content.querySelectorAll('input[name="export-scope"]').forEach((r) => {
+      r.addEventListener('change', (e) => {
+        scope = e.target.value;
+      });
+    });
+
+    // Seleccionar/Deseleccionar todos
+    content.querySelector('#btn-select-all-cols')?.addEventListener('click', () => {
+      content.querySelectorAll('.col-checkbox').forEach((cb) => (cb.checked = true));
+    });
+    content.querySelector('#btn-unselect-all-cols')?.addEventListener('click', () => {
+      content.querySelectorAll('.col-checkbox').forEach((cb) => (cb.checked = false));
+    });
+
+    openModal({
+      title: 'Descargar y Exportar Reporte de Pedidos',
+      content: content,
+      size: 'md',
+      confirmText: 'Descargar Archivo',
+      cancelText: 'Cancelar',
+      confirmVariant: 'primary',
+      onConfirm: async ({ close }) => {
+        // Filtrar columnas seleccionadas
+        const checkedColsIds = Array.from(content.querySelectorAll('.col-checkbox:checked')).map(
+          (cb) => cb.dataset.col
+        );
+        const selectedCols = availableColumns.filter((c) => checkedColsIds.includes(c.id));
+
+        if (selectedCols.length === 0) {
+          toast.error('Debe seleccionar al menos una columna para exportar.');
+          return false;
+        }
+
+        let dataset = [];
+        if (scope === 'actual') {
+          if (state.total > state.items.length) {
+            try {
+              const params = new URLSearchParams();
+              if (state.filters.q) params.set('q', state.filters.q);
+              if (state.filters.tipo && state.filters.tipo !== 'todos') params.set('tipo', state.filters.tipo);
+              if (state.filters.estado && state.filters.estado !== 'todos') params.set('estado', state.filters.estado);
+              if (state.filters.semana && state.filters.semana !== 'todas') params.set('semana', state.filters.semana);
+              else if (Array.isArray(state.filters.semanas) && state.filters.semanas.length > 0) params.set('semanas', state.filters.semanas.join(','));
+              if (state.filters.dia) params.set('dia', state.filters.dia);
+              if (state.filters.financiero && state.filters.financiero !== 'todos') params.set('financiero', state.filters.financiero);
+              params.set('page_size', 'all');
+
+              const fullRes = await apiFetch(`/api/pedidos?${params.toString()}`);
+              if (fullRes && Array.isArray(fullRes.data)) {
+                dataset = fullRes.data;
+              } else {
+                dataset = state.items;
+              }
+            } catch (_) {
+              dataset = state.items;
+            }
+          } else {
+            dataset = state.items;
+          }
+        } else {
+          try {
+            const fullRes = await apiFetch('/api/pedidos?page_size=all');
+            if (fullRes && Array.isArray(fullRes.data)) {
+              dataset = fullRes.data;
+            }
+          } catch (err) {
+            console.error('[Error obteniendo todos los pedidos]', err);
+            toast.error('Error al descargar la tabla completa.');
+            return false;
+          }
+        }
+
+        if (dataset.length === 0) {
+          toast.error('No hay registros para descargar.');
+          return false;
+        }
+
+        const dateSuffix = new Date().toISOString().slice(0, 10);
+        const fileNameBase = `Reporte_Pedidos_${scope === 'total' ? 'General' : 'Filtrado'}_${dateSuffix}`;
+
+        try {
+          if (format === 'excel') {
+            exportToExcel(dataset, selectedCols, fileNameBase);
+          } else if (format === 'word') {
+            exportToWord(dataset, selectedCols, fileNameBase);
+          } else if (format === 'txt') {
+            exportToTxt(dataset, selectedCols, fileNameBase);
+          } else if (format === 'pdf') {
+            exportToPdf(dataset, selectedCols, fileNameBase);
+          }
+
+          toast.success('Archivo descargado correctamente.');
+          if (typeof close === 'function') close();
+        } catch (err) {
+          console.error('[Error generando descarga]', err);
+          toast.error('Error al generar el archivo.');
+          return false;
+        }
+      },
+    });
+  }
+
+  function downloadFileBlob(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  function exportToExcel(records, selectedCols, filename) {
+    let csv = '\uFEFF'; // UTF-8 BOM
+    csv += selectedCols.map((c) => `"${c.label.replace(/"/g, '""')}"`).join(';') + '\r\n';
+    records.forEach((r) => {
+      csv += selectedCols.map((c) => `"${String(c.getValue(r) || '').replace(/"/g, '""')}"`).join(';') + '\r\n';
+    });
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    downloadFileBlob(blob, `${filename}.csv`);
+  }
+
+  function exportToWord(records, selectedCols, filename) {
+    const html = `
+      <html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
+      <head><meta charset='utf-8'><title>${filename}</title>
+      <style>
+        body { font-family: Calibri, Arial, sans-serif; font-size: 10pt; }
+        h2 { color: #581c87; margin-bottom: 4px; }
+        .meta { color: #64748b; font-size: 9pt; margin-bottom: 16px; }
+        table { border-collapse: collapse; width: 100%; margin-top: 10px; }
+        th, td { border: 1px solid #cbd5e1; padding: 6px 8px; text-align: left; font-size: 9pt; }
+        th { background-color: #f1f5f9; color: #1e293b; font-weight: bold; }
+        .money { text-align: right; font-family: monospace; font-weight: bold; }
+      </style>
+      </head>
+      <body>
+        <h2>Reporte de Pedidos — R1 Personalizados</h2>
+        <div class="meta">Fecha de emisión: ${new Date().toLocaleString('es-PY')} · Total de registros: ${records.length}</div>
+        <table>
+          <thead>
+            <tr>${selectedCols.map((c) => `<th>${escapeHtml(c.label)}</th>`).join('')}</tr>
+          </thead>
+          <tbody>
+            ${records
+              .map(
+                (r) => `
+              <tr>${selectedCols.map((c) => `<td class="${c.isMoney ? 'money' : ''}">${escapeHtml(String(c.getValue(r) || '—'))}</td>`).join('')}</tr>
+            `
+              )
+              .join('')}
+          </tbody>
+        </table>
+      </body></html>
+    `;
+    const blob = new Blob([html], { type: 'application/msword;charset=utf-8' });
+    downloadFileBlob(blob, `${filename}.doc`);
+  }
+
+  function exportToTxt(records, selectedCols, filename) {
+    let txt = `================================================================================\r\n`;
+    txt += `REPORTE DE PEDIDOS — R1 PERSONALIZADOS\r\n`;
+    txt += `Fecha de emisión: ${new Date().toLocaleString('es-PY')}\r\n`;
+    txt += `Total de registros: ${records.length}\r\n`;
+    txt += `================================================================================\r\n\r\n`;
+    txt += selectedCols.map((c) => c.label).join('\t') + '\r\n';
+    txt += '-'.repeat(80) + '\r\n';
+    records.forEach((r) => {
+      txt += selectedCols.map((c) => String(c.getValue(r) || '—').replace(/\t/g, ' ')).join('\t') + '\r\n';
+    });
+    const blob = new Blob([txt], { type: 'text/plain;charset=utf-8' });
+    downloadFileBlob(blob, `${filename}.txt`);
+  }
+
+  function exportToPdf(records, selectedCols, filename) {
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      toast.error('Habilite las ventanas emergentes en su navegador para imprimir o guardar el PDF.');
+      return;
+    }
+    printWindow.document.write(`
+      <!DOCTYPE html>
+      <html lang="es">
+      <head>
+        <meta charset="utf-8" />
+        <title>${filename}</title>
+        <style>
+          @page { size: landscape; margin: 10mm; }
+          body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; font-size: 9pt; color: #0f172a; margin: 0; padding: 12px; }
+          .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #a37cfc; padding-bottom: 8px; margin-bottom: 12px; }
+          h1 { margin: 0; font-size: 15pt; color: #4c1d95; }
+          .meta { font-size: 8.5pt; color: #64748b; margin-top: 2px; }
+          table { width: 100%; border-collapse: collapse; font-size: 8pt; }
+          th, td { border: 1px solid #e2e8f0; padding: 5px 6px; text-align: left; vertical-align: middle; }
+          th { background: #f8fafc; font-weight: bold; color: #334155; }
+          tr:nth-child(even) { background: #fdfdfd; }
+          .money { text-align: right; font-family: monospace; font-weight: bold; color: #4c1d95; }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <div>
+            <h1>Reporte de Pedidos — R1 Personalizados</h1>
+            <div class="meta">Fecha de emisión: ${new Date().toLocaleString('es-PY')} · Total de registros: ${records.length}</div>
+          </div>
+        </div>
+        <table>
+          <thead>
+            <tr>${selectedCols.map((c) => `<th>${escapeHtml(c.label)}</th>`).join('')}</tr>
+          </thead>
+          <tbody>
+            ${records
+              .map(
+                (r) => `
+              <tr>${selectedCols.map((c) => `<td class="${c.isMoney ? 'money' : ''}">${escapeHtml(String(c.getValue(r) || '—'))}</td>`).join('')}</tr>
+            `
+              )
+              .join('')}
+          </tbody>
+        </table>
+        <script>
+          window.onload = function() {
+            setTimeout(function() {
+              window.print();
+            }, 300);
+          };
+        </script>
+      </body>
+      </html>
+    `);
+    printWindow.document.close();
   }
 
   // 1. Renderizado síncrono inmediato (evita pantallas en blanco)

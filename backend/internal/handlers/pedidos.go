@@ -186,15 +186,22 @@ func (h *PedidosHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
 	estado := strings.TrimSpace(r.URL.Query().Get("estado"))
-	financiero := strings.TrimSpace(r.URL.Query().Get("financiero"))
-
-	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
-	if page < 1 {
-		page = 1
+	tipo := strings.TrimSpace(r.URL.Query().Get("tipo"))
+	if tipo == "" {
+		tipo = strings.TrimSpace(r.URL.Query().Get("condicion"))
 	}
-	pageSize, _ := strconv.Atoi(r.URL.Query().Get("page_size"))
-	if pageSize < 1 || pageSize > 100 {
-		pageSize = 20
+	financiero := strings.TrimSpace(r.URL.Query().Get("financiero"))
+	dia := strings.TrimSpace(r.URL.Query().Get("dia"))
+
+	page := 1
+	if p, err := strconv.Atoi(r.URL.Query().Get("page")); err == nil && p > 0 {
+		page = p
+	}
+	pageSize := 20
+	if r.URL.Query().Get("page_size") == "all" {
+		pageSize = 100000
+	} else if ps, err := strconv.Atoi(r.URL.Query().Get("page_size")); err == nil && ps > 0 {
+		pageSize = ps
 	}
 
 	now := time.Now()
@@ -207,13 +214,31 @@ func (h *PedidosHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	if q != "" {
 		term := "%" + q + "%"
-		whereClauses = append(whereClauses, "(p.numero_pedido LIKE ? OR p.cliente_nombre LIKE ? OR p.cliente_telefono LIKE ? OR p.cliente_documento LIKE ?)")
-		args = append(args, term, term, term, term)
+		whereClauses = append(whereClauses, `(
+			p.numero_pedido LIKE ? OR
+			p.cliente_nombre LIKE ? OR
+			p.cliente_telefono LIKE ? OR
+			p.cliente_documento LIKE ? OR
+			EXISTS (SELECT 1 FROM pedido_items pi WHERE pi.pedido_id = p.id AND pi.nombre_producto LIKE ?)
+		)`)
+		args = append(args, term, term, term, term, term)
 	}
 
 	if estado != "" && strings.ToLower(estado) != "todos" {
 		whereClauses = append(whereClauses, "p.estado = ?")
 		args = append(args, estado)
+	}
+
+	if tipo != "" && strings.ToLower(tipo) != "todos" {
+		whereClauses = append(whereClauses, "p.condicion_venta = ?")
+		args = append(args, tipo)
+	}
+
+	if dia != "" {
+		if _, err := time.Parse("2006-01-02", dia); err == nil {
+			whereClauses = append(whereClauses, "COALESCE(p.fecha_pedido, DATE(p.created_at)) = ?")
+			args = append(args, dia)
+		}
 	}
 
 	semanasStr := strings.TrimSpace(r.URL.Query().Get("semanas"))
@@ -344,6 +369,18 @@ func (h *PedidosHandler) List(w http.ResponseWriter, r *http.Request) {
 		h.attachItemsToPedidos(r.Context(), pedidos)
 	}
 
+	// Totales generales calculados dinámicamente acorde a los filtros aplicados
+	var sumTotal, sumPagado, sumSaldo float64
+	totalsQuery := fmt.Sprintf(`
+		SELECT
+			COALESCE(SUM(p.monto_total), 0),
+			COALESCE(SUM(p.monto_pagado), 0),
+			COALESCE(SUM(p.saldo_pendiente), 0)
+		FROM pedidos p
+		WHERE %s
+	`, whereSQL)
+	_ = h.DB.QueryRowContext(r.Context(), totalsQuery, args...).Scan(&sumTotal, &sumPagado, &sumSaldo)
+
 	// Obtener contadores para las tarjetas
 	stats := h.getStats(r.Context())
 
@@ -353,11 +390,16 @@ func (h *PedidosHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	_ = json.NewEncoder(w).Encode(map[string]any{
-		"data":             pedidos,
-		"page":             page,
-		"page_size":        pageSize,
-		"total":            total,
-		"stats":            stats,
+		"data":      pedidos,
+		"page":      page,
+		"page_size": pageSize,
+		"total":     total,
+		"stats":     stats,
+		"filteredTotals": map[string]float64{
+			"montoTotal":  sumTotal,
+			"montoPagado": sumPagado,
+			"saldo":       sumSaldo,
+		},
 		"fechaHoy":         fechaHoyFormatted,
 		"semanaActual":     semanaActual,
 		"totalSemanasAnio": totalSemanasAnio,
