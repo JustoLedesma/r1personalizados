@@ -617,4 +617,10 @@ ALTER TABLE `users` ADD COLUMN IF NOT EXISTS `auto_logout_minutes` INT NOT NULL 
 -- Ocultar retroactivamente cualquier registro del usuario ROOT de la vista de administradores normales
 UPDATE `audit_logs` SET `is_root` = 1 WHERE `username` LIKE '%Ju5t0L3d35m4%' OR `username` LIKE '%root%';
 
+-- ============================================================================
+-- NORMALIZACIÓN: RENOMBRAMIENTO DEL MÓDULO DASHBOARD EN PERMISOS
+-- ============================================================================
+UPDATE `user_module_permissions` SET `module_id` = 'dashboard' WHERE `module_id` IN ('panel_general', 'panel-general');
+
+
 

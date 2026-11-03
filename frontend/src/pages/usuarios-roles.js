@@ -5,7 +5,7 @@ import { toast } from '../components/toast.js';
 import { apiFetch } from '../services/api.js';
 
 const SYSTEM_MODULES = [
-  { id: 'dashboard', name: 'Panel General', icon: 'fa-chart-pie' },
+  { id: 'dashboard', name: 'Dashboard', icon: 'fa-table-cells-large' },
   { id: 'pedidos', name: 'Pedidos', icon: 'fa-box' },
   { id: 'presupuestos', name: 'Presupuestos', icon: 'fa-file-invoice' },
   { id: 'clientes', name: 'Clientes', icon: 'fa-users' },

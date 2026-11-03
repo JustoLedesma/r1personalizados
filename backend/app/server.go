@@ -51,6 +51,7 @@ func Run() {
 	pedidosHandler := handlers.NewPedidosHandler(dbConn)
 	pagosHandler := handlers.NewPagosHandler(dbConn)
 	budgetsHandler := handlers.NewBudgetsHandler(dbConn)
+	dashboardHandler := handlers.NewDashboardHandler(dbConn)
 
 	mux := http.NewServeMux()
 
@@ -187,6 +188,11 @@ func Run() {
 		auth.WriteJSONError(w, http.StatusForbidden, "acceso denegado para enviar mensajes")
 	})
 	mux.HandleFunc("/api/whatsapp/render-pdf", whatsappHandler.RenderPDF)
+
+	// Rutas del Dashboard
+	mux.HandleFunc("/api/dashboard/stats", guard("dashboard", dashboardHandler.Stats))
+	mux.HandleFunc("/api/dashboard/drilldown", guard("dashboard", dashboardHandler.Drilldown))
+	mux.HandleFunc("/api/dashboard/drilldown/export", guard("dashboard", dashboardHandler.ExportDrilldown))
 
 	// Rutas del módulo Productos
 	mux.HandleFunc("/api/productos", guard("productos", productosHandler.HandleCollection))

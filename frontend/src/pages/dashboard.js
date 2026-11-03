@@ -14,6 +14,7 @@ import { renderPedidosModule } from './pedidos.js?v=20261103_3';
 import { renderPagosModule } from './pagos.js?v=20261102_18';
 import { renderPresupuestosModule } from './presupuestos.js?v=20261102_16';
 import { renderUsuariosRolesPage } from './usuarios-roles.js?v=20261102_11';
+import { renderDashboardView } from './dashboard-view.js?v=20261103_8';
 import { applyViewOnlyMode } from '../services/permissions.service.js?v=20261102_11';
 import {
   subscribeQueue,
@@ -34,7 +35,7 @@ function escapeHtml(str) {
 }
 
 export const MENU_MODULES = [
-  { id: 'dashboard', label: 'Panel General', icon: 'fa-solid fa-table-cells-large', roles: ['admin', 'editor', 'viewer'] },
+  { id: 'dashboard', label: 'Dashboard', icon: 'fa-solid fa-table-cells-large', roles: ['admin', 'editor', 'viewer'] },
   { id: 'pedidos', label: 'Pedidos', icon: 'fa-regular fa-clipboard', roles: ['admin', 'editor', 'viewer'] },
   { id: 'presupuestos', label: 'Presupuestos', icon: 'fa-regular fa-file-lines', roles: ['admin', 'editor', 'viewer'] },
   { id: 'clientes', label: 'Clientes', icon: 'fa-solid fa-users', roles: ['admin', 'editor', 'viewer'] },
@@ -487,7 +488,7 @@ export function renderDashboardLayout(container, { user, activeModule = 'dashboa
     } else if (currentMod.id === 'users') {
       renderUsuariosRolesPage(mainArea);
     } else if (currentMod.id === 'dashboard') {
-      renderDashboardSummary(mainArea, onNavigate);
+      renderDashboardView(mainArea, onNavigate, currentUser);
     } else {
       renderModulePlaceholder(mainArea, currentMod);
     }
@@ -514,7 +515,7 @@ function renderDashboardSummary(container, onNavigate) {
   wrap.innerHTML = `
     <div class="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl p-6 shadow-xs flex flex-wrap items-center justify-between gap-4">
       <div>
-        <h1 class="text-xl sm:text-2xl font-black text-slate-900 dark:text-white">Panel General — R1 Personalizados</h1>
+        <h1 class="text-xl sm:text-2xl font-black text-slate-900 dark:text-white">Dashboard — R1 Personalizados</h1>
         <p class="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-1">
           Bienvenido al sistema. Seleccione un módulo en el menú lateral o utilice los accesos rápidos a continuación.
         </p>
