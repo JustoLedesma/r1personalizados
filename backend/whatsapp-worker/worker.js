@@ -237,6 +237,7 @@ async function ensureWWebJSPatched() {
         });
 
         // Limpiar __x_id e id de mediaData para evitar colisión en los getters de memoización de WhatsApp Web
+        // y asegurar que el caption no sea sobrescrito con null por toJSON()
         try {
           delete mediaData.__x_id;
           delete mediaData.id;
@@ -246,6 +247,13 @@ async function ensureWWebJSPatched() {
               const res = origToJSON() || {};
               delete res.__x_id;
               delete res.id;
+              // Si mediaData tiene caption asignado, conservarlo; de lo contrario eliminar la propiedad
+              // para evitar que res.caption: null sobrescriba options.caption en el spread {...options, ...mediaOptions, ...mediaJson}
+              if (mediaData.caption) {
+                res.caption = mediaData.caption;
+              } else if (!res.caption) {
+                delete res.caption;
+              }
               return res;
             };
           }
@@ -282,7 +290,20 @@ async function ensureWWebJSPatched() {
           : chat;
       };
 
+      // Hook en sendMessage para garantizar que options.caption se propague a media
+      if (window.WWebJS && window.WWebJS.sendMessage && !window.WWebJS._origSendMessage) {
+        window.WWebJS._origSendMessage = window.WWebJS.sendMessage;
+        window.WWebJS.sendMessage = async function (chat, content, options = {}) {
+          const cap = options.caption || (options.media && options.media.caption);
+          if (cap && options.media && typeof options.media === 'object') {
+            options.media.caption = cap;
+          }
+          return await window.WWebJS._origSendMessage.apply(this, arguments);
+        };
+      }
+
       // Parchear WAWebSendMsgChatAction para sanitizar el payload del mensaje antes de la memoización de WhatsApp
+      // y garantizar que el caption del documento nunca se pierda
       try {
         const sendModule = window.require('WAWebSendMsgChatAction');
         if (sendModule && sendModule.addAndSendMsgToChat && !sendModule._origAddAndSend) {
@@ -294,6 +315,17 @@ async function ensureWWebJSPatched() {
                 if (msg.mediaData && typeof msg.mediaData === 'object') {
                   delete msg.mediaData.__x_id;
                   delete msg.mediaData.id;
+                }
+                // Si existe caption en el mensaje o en mediaData, sincronizar ambos para que WhatsApp Web lo adjunte al documento
+                const cap = msg.caption || (msg.mediaData && msg.mediaData.caption);
+                if (cap) {
+                  msg.caption = cap;
+                  if (msg.mediaData && typeof msg.mediaData === 'object') {
+                    msg.mediaData.caption = cap;
+                    if (typeof msg.mediaData.set === 'function') {
+                      msg.mediaData.set('caption', cap);
+                    }
+                  }
                 }
               } catch (_) {}
             }
@@ -822,13 +854,16 @@ async function sendWhatsAppMessage(payload) {
       const media = new MessageMedia(parsed.mime, parsed.base64, filename);
       const sendOptions = { ...baseSendOptions };
       if (text) {
+        media.caption = text;
         sendOptions.caption = text;
       }
       if (parsed.mime === 'application/pdf') {
         sendOptions.sendMediaAsDocument = true;
       }
+      console.log(`[WA-WORKER] Enviando mensaje con adjunto (${filename}) a ${chatId}. Longitud texto: ${text ? text.length : 0} caracteres.`);
       return await client.sendMessage(chatId, media, sendOptions);
     } else {
+      console.log(`[WA-WORKER] Enviando mensaje de solo texto a ${chatId}. Longitud texto: ${text ? text.length : 0} caracteres.`);
       return await client.sendMessage(chatId, text, baseSendOptions);
     }
   };
@@ -983,6 +1018,7 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === 'POST' && pathname === '/send') {
       const body = await readJsonBody(req);
+      console.log(`[WA-WORKER /send] Solicitud recibida para destinatario: ${body.phone}, Mensaje: "${String(body.message || '').substring(0, 50)}...", Adjunto: ${body.media ? (body.media.filename || 'sí') : 'no'}`);
       const result = await sendWhatsAppMessage(body);
       return sendJSON(res, 200, result);
     }

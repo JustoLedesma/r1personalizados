@@ -16,7 +16,7 @@ import {
   formatRemainingDuration,
   consumePreferredBroadcastTab,
   clearCompletedBroadcastBanner,
-} from '../services/queue-manager.js?v=20261030_5';
+} from '../services/queue-manager.js?v=20261104_1';
 
 const QUICK_EMOJIS = ['👋', '😊', '✨', '🎉', '👍', '💼', '💰', '🗓️'];
 

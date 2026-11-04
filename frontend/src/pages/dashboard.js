@@ -22,7 +22,7 @@ import {
   syncPendingTasksFromDB,
   setPreferredBroadcastTab,
   clearCompletedBroadcastBanner,
-} from '../services/queue-manager.js?v=20261102_12';
+} from '../services/queue-manager.js?v=20261104_1';
 
 function escapeHtml(str) {
   if (str === null || str === undefined) return '';
