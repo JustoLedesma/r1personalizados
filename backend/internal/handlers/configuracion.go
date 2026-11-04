@@ -137,19 +137,44 @@ func (h *ConfiguracionHandler) HandleBudgetTemplate(w http.ResponseWriter, r *ht
 
 func (h *ConfiguracionHandler) GetBudgetTemplate(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	var empLogo string
 	if h.DB != nil {
+		var rawEmp string
+		if err := h.DB.QueryRowContext(r.Context(), "SELECT valor FROM configuraciones WHERE clave = 'empresa_datos'").Scan(&rawEmp); err == nil && strings.TrimSpace(rawEmp) != "" {
+			var empMap map[string]any
+			if json.Unmarshal([]byte(rawEmp), &empMap) == nil {
+				if l, ok := empMap["logo_url"].(string); ok && strings.TrimSpace(l) != "" {
+					empLogo = strings.TrimSpace(l)
+				}
+			}
+		}
+
 		var rawValor string
 		err := h.DB.QueryRowContext(r.Context(), "SELECT valor FROM configuraciones WHERE clave = 'budget_template'").Scan(&rawValor)
 		if err == nil && strings.TrimSpace(rawValor) != "" {
 			var parsed map[string]any
 			if json.Unmarshal([]byte(rawValor), &parsed) == nil {
 				// Si ya cuenta con la estructura enriquecida de personalización visual, devolverla
-				if _, ok := parsed["caratula"]; ok {
+				if caratula, ok := parsed["caratula"].(map[string]any); ok {
+					curLogo, _ := caratula["logo_url"].(string)
+					curLogo = strings.TrimSpace(curLogo)
+					if curLogo == "" || curLogo == "/logo/R1.png" || curLogo == "./logo/r1.png" {
+						if empLogo != "" {
+							caratula["logo_url"] = empLogo
+						} else {
+							caratula["logo_url"] = "./logo/r1.png"
+						}
+					}
 					_ = json.NewEncoder(w).Encode(parsed)
 					return
 				}
 			}
 		}
+	}
+
+	fallbackLogo := "./logo/r1.png"
+	if empLogo != "" {
+		fallbackLogo = empLogo
 	}
 
 	// Configuración y Plantilla Oficial Predeterminada de R1 Personalizados
@@ -158,7 +183,7 @@ func (h *ConfiguracionHandler) GetBudgetTemplate(w http.ResponseWriter, r *http.
 		"caratula": map[string]any{
 			"logo_ancho":   140,
 			"estilo_color": "#435A62",
-			"logo_url":     "/logo/R1.png",
+			"logo_url":     fallbackLogo,
 		},
 		"pagina2": map[string]any{
 			"cabecera_logo_visible":     true,

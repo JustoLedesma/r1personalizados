@@ -5,7 +5,7 @@ const STORAGE_KEY = 'theme';
 export const LOGOS = {
   BLUE: 'https://netz.com.py/route1/img/header/NETZ-IA.svg',
   WHITE: 'https://netz.com.py/route1/img/header/NETZ-BLANCO.svg',
-  LOGIN: './logo/R1.png',
+  LOGIN: './logo/r1.png',
 };
 
 export function isDarkMode() {

@@ -87,7 +87,7 @@ export function getDefaultBudgetConfig() {
     caratula: {
       logo_ancho: 140,
       estilo_color: '#435A62',
-      logo_url: '/logo/R1.png',
+      logo_url: './logo/r1.png',
     },
     pagina2: {
       cabecera_logo_visible: true,
@@ -564,6 +564,7 @@ export function generateBudgetHtml(budget, config) {
   const themeColor = c.caratula?.estilo_color || '#435A62';
   const logoAncho = c.caratula?.logo_ancho || 140;
   const logoAltoP2 = c.pagina2?.cabecera_logo_alto || 28;
+  const companyLogoUrl = c.caratula?.logo_url || b.empresa?.logo_url || './logo/r1.png';
   const textScale = (c.pagina2?.tamano_textos_porcentaje || 100) / 100;
   const blockGap = c.pagina2?.separacion_bloques_px || 20;
 
@@ -636,7 +637,7 @@ export function generateBudgetHtml(budget, config) {
           <div class="photo-grid" style="display: grid; grid-template-columns: repeat(${cols}, 1fr); gap: 10px; margin-top: 10px; margin-bottom: auto;">
             ${pagePhotos.map((f) => `
               <div class="photo-card" style="text-align: center; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 6px; padding: 6px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); display: flex; flex-direction: column; align-items: center; justify-content: center;">
-                <img src="${f.url || '/logo/R1.png'}" style="height: ${photoCardHeightMm}mm; max-height: ${photoCardHeightMm}mm; width: 100%; object-fit: contain; border-radius: 4px;" onerror="this.src='/logo/R1.png'" />
+                <img src="${f.url || './logo/r1.png'}" style="height: ${photoCardHeightMm}mm; max-height: ${photoCardHeightMm}mm; width: 100%; object-fit: contain; border-radius: 4px;" onerror="this.src='./logo/r1.png'" />
                 <div class="title" style="font-size: 9px; font-weight: 600; margin-top: 4px; color: #334155; line-height: 1.2;">
                   ${f.nombre || 'Producto cotizado'}
                 </div>
@@ -733,13 +734,13 @@ export function generateBudgetHtml(budget, config) {
 <body>
   <!-- HOJA 1: PORTADA -->
   <div class="page page-1">
-    <img src="/logo/R1.png" alt="R1 Personalizados" />
+    <img src="${companyLogoUrl}" alt="Logo Carátula" onerror="this.src='./logo/r1.png'" />
   </div>
 
   <!-- HOJA 2: PRESUPUESTO OFICIAL -->
   <div class="page page-2">
     <div class="header-logo">
-      <img src="/logo/R1.png" alt="R1 Logo" />
+      <img src="${companyLogoUrl}" alt="Logo Cabecera" onerror="this.src='./logo/r1.png'" />
     </div>
     <div class="official-bar">
       ${c.pagina2?.titulo_barra_texto || 'PRESUPUESTO OFICIAL'}
@@ -778,7 +779,7 @@ export function generateBudgetHtml(budget, config) {
             (it) => `
           <tr>
             <td>
-              <img src="${it.imagen_url || '/logo/R1.png'}" class="item-thumb" />
+              <img src="${it.imagen_url || './logo/r1.png'}" class="item-thumb" onerror="this.src='./logo/r1.png'" />
               ${it.descripcion}
             </td>
             <td class="text-right">${it.precio_unitario_formateado || `${it.precio_unitario || 0} Gs.`}</td>

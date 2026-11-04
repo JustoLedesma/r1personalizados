@@ -23,7 +23,7 @@ import {
   buildBudgetMessageText,
   generateBudgetPDFBlob,
   downloadBudgetPDFFile,
-} from '../services/budget-document.service.js?v=20261102_02';
+} from '../services/budget-document.service.js?v=20261104_1';
 
 /**
  * Normaliza cualquier formato de fecha a YYYY-MM-DD para <input type="date"> y MySQL
@@ -1672,7 +1672,7 @@ export function renderPresupuestosModule(container, onNavigate) {
           <div class="autocomplete-item p-3 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer transition flex items-center justify-between gap-3"
             data-item-id="${p.id}">
             <div class="flex items-center gap-3">
-              <img src="${escapeHtml(img || '/logo/R1.png')}" class="w-10 h-10 rounded-lg object-contain bg-white dark:bg-slate-800 p-0.5 border border-slate-200 dark:border-slate-700 shadow-2xs" onerror="this.src='/logo/R1.png'" />
+              <img src="${escapeHtml(img || './logo/r1.png')}" class="w-10 h-10 rounded-lg object-contain bg-white dark:bg-slate-800 p-0.5 border border-slate-200 dark:border-slate-700 shadow-2xs" onerror="this.src='./logo/r1.png'" />
               <div>
                 <div class="text-xs font-bold text-slate-800 dark:text-slate-200">${escapeHtml(p.nombre)}</div>
                 <div class="text-[10px] text-slate-400">
@@ -1707,7 +1707,7 @@ export function renderPresupuestosModule(container, onNavigate) {
           precio_unitario: precio,
           cantidad: 1,
           total: precio,
-          imagen_url: img || '/logo/R1.png',
+          imagen_url: img || './logo/r1.png',
           proveedor_id: prID,
           proveedor_casual: isCasualProvActive,
           proveedor_nombre: prNom,
@@ -1817,7 +1817,7 @@ export function renderPresupuestosModule(container, onNavigate) {
         precio_unitario: precio,
         cantidad: casualItemQty,
         total: precio * casualItemQty,
-        imagen_url: '/logo/R1.png',
+        imagen_url: './logo/r1.png',
         proveedor_id: prID,
         proveedor_casual: isCasualProvActive,
         proveedor_nombre: prNom,
@@ -2345,7 +2345,7 @@ export function renderPresupuestosModule(container, onNavigate) {
           </td>
           <td class="py-3 px-3 border-r border-slate-100 dark:border-slate-800">
             <div class="flex items-center gap-2.5">
-              <img src="${escapeHtml(it.imagen_url || '/logo/R1.png')}" class="w-8 h-8 rounded-lg object-contain bg-slate-100 dark:bg-slate-800 p-0.5 border border-slate-200 dark:border-slate-700 shadow-2xs" onerror="this.src='/logo/R1.png'" />
+              <img src="${escapeHtml(it.imagen_url || './logo/r1.png')}" class="w-8 h-8 rounded-lg object-contain bg-slate-100 dark:bg-slate-800 p-0.5 border border-slate-200 dark:border-slate-700 shadow-2xs" onerror="this.src='./logo/r1.png'" />
               <div>
                 <div class="font-bold text-slate-800 dark:text-slate-200">${escapeHtml(it.descripcion)}</div>
                 <div class="text-[10px] text-slate-400 flex flex-wrap items-center gap-1.5 mt-0.5">
@@ -2629,7 +2629,7 @@ export function renderPresupuestosModule(container, onNavigate) {
 
         card.innerHTML = `
           <div class="relative w-full aspect-square rounded-lg overflow-hidden bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 flex items-center justify-center cursor-pointer btn-zoom-photo">
-            <img src="${escapeHtml(foto.url || '/logo/R1.png')}" class="w-full h-full object-contain p-2 group-hover:scale-105 transition" onerror="this.src='/logo/R1.png'" />
+            <img src="${escapeHtml(foto.url || './logo/r1.png')}" class="w-full h-full object-contain p-2 group-hover:scale-105 transition" onerror="this.src='./logo/r1.png'" />
             <div class="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition flex items-center justify-center text-white gap-2 text-xs">
               <i class="fa-solid fa-magnifying-glass-plus"></i>
               <span>Ampliar</span>
@@ -2901,7 +2901,7 @@ export function renderPresupuestosModule(container, onNavigate) {
         title: title || 'Vista Previa Ampliada',
         content: `
           <div class="flex flex-col items-center justify-center p-4">
-            <img src="${escapeHtml(imgUrl || '/logo/R1.png')}" class="max-h-[70vh] max-w-full rounded-xl object-contain shadow-md" onerror="this.src='/logo/R1.png'" />
+            <img src="${escapeHtml(imgUrl || './logo/r1.png')}" class="max-h-[70vh] max-w-full rounded-xl object-contain shadow-md" onerror="this.src='./logo/r1.png'" />
             <div class="mt-3 text-xs text-slate-500 font-semibold">${escapeHtml(title || '')}</div>
           </div>
         `,
@@ -3089,7 +3089,7 @@ export function renderPresupuestosModule(container, onNavigate) {
         galeria_rows: formData.galeria_rows || 4,
         galeria_layout: formData.galeria_layout || '2x4',
         empresa: {
-          logo_url: templateConfig?.caratula?.logo_url || '/logo/R1.png',
+          logo_url: templateConfig?.caratula?.logo_url || './logo/r1.png',
           razon_social: 'R1 Personalizados',
           ruc: '00012345-0',
           telefonos: ['+595 981 654321'],

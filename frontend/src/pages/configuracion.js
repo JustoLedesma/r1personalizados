@@ -1398,6 +1398,14 @@ export function renderConfiguracionModule(container) {
 
     // Estado local de la configuración y previsualización
     let cfg = BudgetDocumentService.getDefaultBudgetConfig();
+
+    function getPresupuestoLogoUrl() {
+      const emp = state.configs?.empresa_datos?.logo_url;
+      if (emp && emp.trim()) return emp.trim();
+      if (cfg?.caratula?.logo_url && cfg.caratula.logo_url.trim()) return cfg.caratula.logo_url.trim();
+      return './logo/r1.png';
+    }
+
     let sampleBudget = {
       id: 3,
       numero_presupuesto: 'PRES-2026-0003',
@@ -1413,10 +1421,10 @@ export function renderConfiguracionModule(container) {
         direccion: 'Presidente Franco, Paraguay',
       },
       items: [
-        { id: 1, descripcion: 'Taza para Bebe', precio_unitario: 50000, precio_unitario_formateado: '50.000 Gs.', cantidad: 10, total: 500000, total_formateado: '500.000 Gs.', imagen_url: '/logo/R1.png' },
-        { id: 2, descripcion: 'Taza Especial Sublimada R1', precio_unitario: 150000, precio_unitario_formateado: '150.000 Gs.', cantidad: 10, total: 1500000, total_formateado: '1.500.000 Gs.', imagen_url: '/logo/R1.png' },
-        { id: 3, descripcion: 'Taza Magica Sublimada 350ml', precio_unitario: 45000, precio_unitario_formateado: '45.000 Gs.', cantidad: 10, total: 450000, total_formateado: '450.000 Gs.', imagen_url: '/logo/R1.png' },
-        { id: 4, descripcion: 'Kepis', precio_unitario: 55000, precio_unitario_formateado: '55.000 Gs.', cantidad: 15, total: 825000, total_formateado: '825.000 Gs.', imagen_url: '/logo/R1.png' },
+        { id: 1, descripcion: 'Taza para Bebe', precio_unitario: 50000, precio_unitario_formateado: '50.000 Gs.', cantidad: 10, total: 500000, total_formateado: '500.000 Gs.', imagen_url: './logo/r1.png' },
+        { id: 2, descripcion: 'Taza Especial Sublimada R1', precio_unitario: 150000, precio_unitario_formateado: '150.000 Gs.', cantidad: 10, total: 1500000, total_formateado: '1.500.000 Gs.', imagen_url: './logo/r1.png' },
+        { id: 3, descripcion: 'Taza Magica Sublimada 350ml', precio_unitario: 45000, precio_unitario_formateado: '45.000 Gs.', cantidad: 10, total: 450000, total_formateado: '450.000 Gs.', imagen_url: './logo/r1.png' },
+        { id: 4, descripcion: 'Kepis', precio_unitario: 55000, precio_unitario_formateado: '55.000 Gs.', cantidad: 15, total: 825000, total_formateado: '825.000 Gs.', imagen_url: './logo/r1.png' },
       ],
       totales: {
         subtotal: 3275000,
@@ -1428,11 +1436,11 @@ export function renderConfiguracionModule(container) {
         total_final_formateado: '3.200.000 Gs.',
       },
       imagenes_productos: [
-        { nombre: 'Taza para Bebe', url: '/logo/R1.png' },
-        { nombre: 'Taza para Bebe', url: '/logo/R1.png' },
-        { nombre: 'Taza Especial Sublimada R1', url: '/logo/R1.png' },
-        { nombre: 'Taza Magica Sublimada 350ml', url: '/logo/R1.png' },
-        { nombre: 'Kepis', url: '/logo/R1.png' },
+        { nombre: 'Taza para Bebe', url: './logo/r1.png' },
+        { nombre: 'Taza para Bebe', url: './logo/r1.png' },
+        { nombre: 'Taza Especial Sublimada R1', url: './logo/r1.png' },
+        { nombre: 'Taza Magica Sublimada 350ml', url: './logo/r1.png' },
+        { nombre: 'Kepis', url: './logo/r1.png' },
       ],
     };
 
@@ -1584,7 +1592,7 @@ export function renderConfiguracionModule(container) {
         <!-- Miniatura carátula -->
         <div class="w-24 shrink-0 text-center">
           <div id="mini-cover-thumb" class="w-24 h-32 rounded-xl flex items-center justify-center shadow-xs transition-colors overflow-hidden border border-slate-700/20" style="background-color: ${cfg.caratula.estilo_color};">
-            <img id="mini-cover-logo" src="/logo/R1.png" alt="R1" class="transition-all" style="width: ${Math.max(12, cfg.caratula.logo_ancho * 0.45)}px;" />
+            <img id="mini-cover-logo" src="${escapeHtml(getPresupuestoLogoUrl())}" alt="Logo Carátula" class="transition-all" style="width: ${Math.max(12, cfg.caratula.logo_ancho * 0.45)}px;" onerror="this.src='./logo/r1.png'" />
           </div>
           <span class="text-[10px] text-slate-400 mt-1 block">Escala en carátula</span>
         </div>
@@ -2193,8 +2201,9 @@ export function renderConfiguracionModule(container) {
         p1.style.backgroundColor = cfg.caratula.estilo_color;
 
         const logoScalePx = Math.round((cfg.caratula.logo_ancho / 210) * baseA4W);
+        const p1LogoUrl = getPresupuestoLogoUrl();
         p1.innerHTML = `
-          <img src="/logo/R1.png" alt="R1 Personalizados" class="transition-all" style="width: ${logoScalePx}px; max-width: 90%;" />
+          <img src="${escapeHtml(p1LogoUrl)}" alt="Logo Carátula" class="transition-all" style="width: ${logoScalePx}px; max-width: 90%;" onerror="this.src='./logo/r1.png'" />
         `;
         pagesWrapper.appendChild(p1);
       }
@@ -2211,6 +2220,7 @@ export function renderConfiguracionModule(container) {
         const scale = (cfg.pagina2.tamano_textos_porcentaje / 100);
         const gap = cfg.pagina2.separacion_bloques_px;
         const logoH = Math.round((cfg.pagina2.cabecera_logo_alto / 297) * baseA4H);
+        const p2LogoUrl = getPresupuestoLogoUrl();
 
         const desc = cfg.pagina2.descuento;
         const terminosCfg = cfg.pagina2.terminos || {};
@@ -2235,7 +2245,7 @@ export function renderConfiguracionModule(container) {
         p2.innerHTML = `
           <!-- Logo Superior -->
           <div class="text-center mb-1 shrink-0" style="${cfg.pagina2.cabecera_logo_visible ? '' : 'display: none;'}">
-            <img src="/logo/R1.png" alt="R1" class="mx-auto" style="height: ${logoH}px;" />
+            <img src="${escapeHtml(p2LogoUrl)}" alt="Logo Cabecera" class="mx-auto" style="height: ${logoH}px;" onerror="this.src='./logo/r1.png'" />
           </div>
 
           <!-- Barra Oficial -->
