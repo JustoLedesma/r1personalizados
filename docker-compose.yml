@@ -1,0 +1,78 @@
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: r1personalizados-mysql
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: "L3d35m41991@Ju5t0"
+      MYSQL_DATABASE: "r1personalizados"
+      MYSQL_USER: "Ju5t0L3d35m4"
+      MYSQL_PASSWORD: "L3d35m41991@Ju5t0"
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+
+  phpmyadmin:
+    image: phpmyadmin:latest
+    container_name: r1personalizados-phpmyadmin
+    restart: always
+    environment:
+      PMA_HOST: mysql
+      PMA_PORT: 3306
+      UPLOAD_LIMIT: 10G
+      MEMORY_LIMIT: 10G
+      MAX_EXECUTION_TIME: 86400
+    ports:
+      - "8080:80"
+    depends_on:
+      - mysql
+
+  backend:
+    build:
+      context: .
+      dockerfile_inline: |
+        FROM golang:1.22-alpine AS builder
+        WORKDIR /app
+        COPY go.mod go.sum ./
+        RUN go mod download
+        COPY . .
+        RUN CGO_ENABLED=0 GOOS=linux go build -o server ./cmd/server
+        
+        FROM node:20-slim
+        WORKDIR /app
+        RUN apt-get update && apt-get install -y \
+            chromium fonts-ipafont-gothic fonts-wqy-zenhei fonts-thai-tlwg fonts-kacst fonts-freefont-ttf libxss1 ca-certificates tzdata ffmpeg --no-install-recommends && rm -rf /var/lib/apt/lists/*
+        ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
+            PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+        COPY --from=builder /app/server .
+        COPY --from=builder /app/backend/.env ./backend/.env
+        COPY --from=builder /app/backend/whatsapp-worker ./backend/whatsapp-worker
+        RUN cd ./backend/whatsapp-worker && npm install
+        EXPOSE 8081 3000
+        CMD ["./server"]
+    container_name: r1personalizados-backend
+    restart: always
+    env_file:
+      - ./backend/.env
+    depends_on:
+      - mysql
+    volumes:
+      - whatsapp_session:/app/backend/whatsapp-worker/.wwebjs_auth
+
+  nginx:
+    image: nginx:alpine
+    container_name: r1personalizados-nginx
+    restart: always
+    ports:
+      - "8081:80"
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./frontend:/usr/share/nginx/html:ro
+      - ./logo:/usr/share/nginx/html/logo:ro
+    depends_on:
+      - backend
+
+volumes:
+  mysql_data:
+  whatsapp_session:
