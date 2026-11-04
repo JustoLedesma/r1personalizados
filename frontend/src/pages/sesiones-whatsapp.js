@@ -1,7 +1,8 @@
 import { createButton } from '../components/button.js';
-import { openConfirmModal } from '../components/modal.js';
+import { openModal, openConfirmModal } from '../components/modal.js';
 import { openImageZoomModal } from '../components/media-attachment.js?v=20261030_5';
 import { toast } from '../components/toast.js';
+import { apiFetch } from '../services/api.js';
 import {
   subscribeQueue,
   refreshWhatsAppStatus,
@@ -90,25 +91,233 @@ export function renderSesionesWhatsAppModule(container) {
     },
   });
 
+  function showFullRestartProgressModal() {
+    const overlay = document.createElement('div');
+    overlay.id = 'r1-restart-progress-overlay';
+    overlay.className =
+      'fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4 animate-fade-in';
+
+    overlay.innerHTML = `
+      <div class="w-full max-w-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 sm:p-8 shadow-2xl text-center space-y-6">
+        <div class="w-16 h-16 rounded-2xl bg-brand-soft dark:bg-brand/20 text-brand mx-auto flex items-center justify-center border border-brand/30 shadow-xs">
+          <i class="fa-solid fa-arrows-rotate fa-spin text-3xl"></i>
+        </div>
+
+        <div class="space-y-1">
+          <div class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-brand-soft dark:bg-brand/20 text-brand">
+            <i class="fa-solid fa-server text-[10px]"></i> Contenedor r1personalizados-backend
+          </div>
+          <h3 class="text-base sm:text-lg font-bold text-slate-900 dark:text-white pt-1">
+            Reiniciando Contenedor y Servicio de WhatsApp
+          </h3>
+          <p class="text-xs text-slate-500 dark:text-slate-400">
+            Por favor no cierres ni recargues la página. Se detectará automáticamente la reconexión del servidor.
+          </p>
+        </div>
+
+        <!-- Barra de Progreso -->
+        <div class="space-y-2 text-left pt-2">
+          <div class="flex items-center justify-between text-xs">
+            <span id="restart-progress-status" class="font-semibold text-slate-700 dark:text-slate-300">
+              Limpiando bloqueos Singleton en .wwebjs_auth...
+            </span>
+            <span id="restart-progress-percent" class="font-bold font-mono text-brand">10%</span>
+          </div>
+          <div class="w-full h-3 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden shadow-inner p-0.5 border border-slate-200/60 dark:border-slate-700/60">
+            <div id="restart-progress-bar" class="h-full bg-brand transition-all duration-500 rounded-full" style="width: 10%"></div>
+          </div>
+        </div>
+
+        <!-- Contadores de tiempo y aviso -->
+        <div class="grid grid-cols-2 gap-3 pt-1 text-center font-mono text-xs">
+          <div class="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-800">
+            <span class="block text-[10px] uppercase font-sans text-slate-400 font-bold">Tiempo Transcurrido</span>
+            <span id="restart-elapsed-clock" class="text-slate-800 dark:text-slate-200 font-bold text-sm">00:00</span>
+          </div>
+          <div class="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-800">
+            <span class="block text-[10px] uppercase font-sans text-slate-400 font-bold">Tiempo Estimado</span>
+            <span class="text-brand font-bold text-sm">~60s</span>
+          </div>
+        </div>
+
+        <div class="text-[11px] text-slate-400 dark:text-slate-500 flex items-center justify-center gap-1.5">
+          <i class="fa-solid fa-spinner fa-spin text-brand"></i>
+          <span>Monitoreando respuesta del servidor en segundo plano...</span>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(overlay);
+
+    const progressBar = overlay.querySelector('#restart-progress-bar');
+    const progressPercent = overlay.querySelector('#restart-progress-percent');
+    const progressStatus = overlay.querySelector('#restart-progress-status');
+    const elapsedClock = overlay.querySelector('#restart-elapsed-clock');
+
+    let seconds = 0;
+    let isBackOnline = false;
+
+    const timerInterval = setInterval(() => {
+      seconds++;
+      const pad = (n) => String(n).padStart(2, '0');
+      if (elapsedClock) {
+        elapsedClock.textContent = `${pad(Math.floor(seconds / 60))}:${pad(seconds % 60)}`;
+      }
+
+      if (!isBackOnline && progressBar && progressPercent && progressStatus) {
+        // Cálculo gradual del porcentaje estimado (alcanza el 92% a los ~55 segundos)
+        const pct = Math.min(92, Math.max(10, Math.round(10 + (seconds / 55) * 82)));
+        progressBar.style.width = `${pct}%`;
+        progressPercent.textContent = `${pct}%`;
+
+        if (seconds < 12) {
+          progressStatus.textContent = '1/4: Bloqueos Singleton eliminados. Reiniciando contenedor...';
+        } else if (seconds < 28) {
+          progressStatus.textContent = '2/4: Contenedor r1personalizados-backend reiniciándose en el servidor...';
+        } else if (seconds < 45) {
+          progressStatus.textContent = '3/4: Esperando disponibilidad del backend y base de datos...';
+        } else {
+          progressStatus.textContent = '4/4: Inicializando navegador headless de WhatsApp Web...';
+        }
+      }
+    }, 1000);
+
+    // Sondeo al backend cada 3 segundos a partir de los 8 segundos
+    const checkInterval = setInterval(async () => {
+      if (seconds < 8 || isBackOnline) return;
+
+      try {
+        const resp = await fetch('./api/whatsapp/status', {
+          method: 'GET',
+          cache: 'no-store',
+          credentials: 'include',
+        });
+
+        if (resp.ok || resp.status === 200 || resp.status === 401 || resp.status === 403) {
+          isBackOnline = true;
+          clearInterval(timerInterval);
+          clearInterval(checkInterval);
+
+          if (progressBar) progressBar.style.width = '100%';
+          if (progressPercent) progressPercent.textContent = '100%';
+          if (progressStatus) progressStatus.textContent = '¡Sistema y contenedor restablecidos con éxito!';
+
+          toast.success('El contenedor y el servicio de WhatsApp se reiniciaron correctamente.');
+
+          setTimeout(() => {
+            overlay.remove();
+            refreshWhatsAppStatus().catch(() => {});
+          }, 1200);
+        }
+      } catch (_) {
+        // Continúa esperando a que el contenedor termine de levantar
+      }
+    }, 3000);
+  }
+
+  function openAdminRestartModal() {
+    const modalContent = document.createElement('div');
+    modalContent.className = 'space-y-4';
+
+    modalContent.innerHTML = `
+      <div class="p-4 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/70 text-amber-900 dark:text-amber-200 text-xs sm:text-sm space-y-2">
+        <div class="flex items-center gap-2 font-bold text-amber-800 dark:text-amber-300">
+          <i class="fa-solid fa-triangle-exclamation text-amber-600 dark:text-amber-400 text-base"></i>
+          <span>Atención: Interrupción Temporal del Sistema</span>
+        </div>
+        <p class="text-xs text-amber-900/90 dark:text-amber-200/90 leading-relaxed">
+          Esta acción ejecutará en el servidor la limpieza forzada de bloqueos residuales de WhatsApp (<code>Singleton*</code>) y reiniciará el contenedor <strong>r1personalizados-backend</strong>.
+        </p>
+        <div class="p-2.5 rounded-lg bg-amber-100/70 dark:bg-amber-900/40 border border-amber-300/60 dark:border-amber-700/60 flex items-center gap-2 text-xs font-semibold text-rose-700 dark:text-rose-300">
+          <i class="fa-solid fa-circle-exclamation shrink-0"></i>
+          <span>Todo el sistema dejará de responder por 1 a 2 minutos mientras el contenedor se reinicia en el VPS.</span>
+        </div>
+      </div>
+
+      <div class="space-y-2 pt-1">
+        <label for="restart-admin-password" class="block text-xs font-bold text-slate-700 dark:text-slate-200">
+          Contraseña de Administrador <span class="text-rose-500">*</span>
+        </label>
+        <div class="relative">
+          <input
+            type="password"
+            id="restart-admin-password"
+            placeholder="Ingresa tu contraseña de admin para autorizar..."
+            class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-brand pr-10"
+            autocomplete="current-password"
+          />
+          <button
+            type="button"
+            id="toggle-restart-admin-password"
+            aria-label="Mostrar u ocultar contraseña"
+            class="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors"
+          >
+            <i class="fa-regular fa-eye"></i>
+          </button>
+        </div>
+        <p class="text-[11px] text-slate-400 dark:text-slate-500">
+          Se requiere autenticación de administrador para ejecutar el reinicio del contenedor.
+        </p>
+      </div>
+    `;
+
+    const pwdInput = modalContent.querySelector('#restart-admin-password');
+    const toggleBtn = modalContent.querySelector('#toggle-restart-admin-password');
+    toggleBtn.addEventListener('click', () => {
+      const isPwd = pwdInput.type === 'password';
+      pwdInput.type = isPwd ? 'text' : 'password';
+      toggleBtn.innerHTML = isPwd
+        ? '<i class="fa-regular fa-eye-slash"></i>'
+        : '<i class="fa-regular fa-eye"></i>';
+    });
+
+    openModal({
+      title: 'Reinicio de Contenedor y Servicio de WhatsApp',
+      content: modalContent,
+      size: 'md',
+      confirmText: 'Autorizar y Reiniciar',
+      cancelText: 'Cancelar',
+      confirmVariant: 'danger',
+      onConfirm: async ({ close, setLoading }) => {
+        const password = pwdInput.value.trim();
+        if (!password) {
+          toast.warning('Debes ingresar la contraseña de administrador.');
+          pwdInput.focus();
+          return;
+        }
+
+        setLoading(true);
+        try {
+          const res = await apiFetch('/api/whatsapp/restart-full', {
+            method: 'POST',
+            body: JSON.stringify({ password }),
+          });
+
+          toast.info(res.message || 'Bloqueos eliminados. Reiniciando contenedor...');
+          close();
+
+          // Lanzar la barra de progreso de reinicio con monitoreo en vivo
+          showFullRestartProgressModal();
+        } catch (err) {
+          toast.error(err.message || 'Contraseña de administrador incorrecta o error al reiniciar.');
+          setLoading(false);
+        }
+      },
+    });
+
+    setTimeout(() => {
+      if (pwdInput) pwdInput.focus();
+    }, 150);
+  }
+
   const btnRestart = createButton({
     text: 'Reiniciar Sesión',
     icon: 'fa-solid fa-arrows-rotate',
     variant: 'primary',
     size: 'md',
-    ariaLabel: 'Reiniciar sesión de WhatsApp',
-    onClick: async () => {
-      if (actionInProgress) return;
-      actionInProgress = true;
-      btnRestart.setLoading(true);
-      try {
-        await restartWhatsAppSession();
-        toast.info('Reiniciando sesión de WhatsApp. Espera mientras finaliza el temporizador...');
-      } catch (err) {
-        toast.error(err.message || 'No se pudo reiniciar la sesión de WhatsApp.');
-      } finally {
-        actionInProgress = false;
-        btnRestart.setLoading(false);
-      }
+    ariaLabel: 'Reiniciar sesión de WhatsApp y contenedor',
+    onClick: () => {
+      openAdminRestartModal();
     },
   });
 

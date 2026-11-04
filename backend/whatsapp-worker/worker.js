@@ -507,7 +507,30 @@ async function populateAccountInfo() {
   };
 }
 
+function removeSingletonLocks(targetDir = AUTH_DIR) {
+  try {
+    if (!fs.existsSync(targetDir)) return;
+    const entries = fs.readdirSync(targetDir, { withFileTypes: true });
+    for (const ent of entries) {
+      const full = path.join(targetDir, ent.name);
+      if (ent.isDirectory()) {
+        removeSingletonLocks(full);
+      } else if (ent.name.startsWith('Singleton')) {
+        try {
+          fs.unlinkSync(full);
+          console.log(`[WA-WORKER] Bloqueo residual eliminado: ${full}`);
+        } catch (_) {}
+      }
+    }
+  } catch (err) {
+    console.warn('[WA-WORKER] Error limpiando bloqueos Singleton:', err.message);
+  }
+}
+
 async function startClient({ asRestart = false } = {}) {
+  // Limpiar preventivamente cualquier archivo de bloqueo de Chromium antes de inicializar
+  removeSingletonLocks(AUTH_DIR);
+
   if (isStarting) {
     return;
   }

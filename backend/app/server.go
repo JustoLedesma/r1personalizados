@@ -43,7 +43,7 @@ func Run() {
 	clientesHandler := handlers.NewClientesHandler(dbConn)
 	proveedoresHandler := handlers.NewProveedoresHandler(dbConn)
 	perfilesMensajesHandler := handlers.NewPerfilesMensajesHandler(dbConn)
-	whatsappHandler := handlers.NewWhatsAppHandler()
+	whatsappHandler := handlers.NewWhatsAppHandler(dbConn)
 	difusionMensajesHandler := handlers.NewDifusionMensajesHandler(dbConn, whatsappHandler)
 	reciclajeHandler := handlers.NewReciclajeHandler(dbConn)
 	configuracionHandler := handlers.NewConfiguracionHandler(dbConn)
@@ -168,6 +168,7 @@ func Run() {
 	})
 	mux.HandleFunc("/api/whatsapp/start", guard("sesiones-whatsapp", whatsappHandler.Start))
 	mux.HandleFunc("/api/whatsapp/restart", guard("sesiones-whatsapp", whatsappHandler.Restart))
+	mux.HandleFunc("/api/whatsapp/restart-full", guard("sesiones-whatsapp", whatsappHandler.RestartFull))
 	mux.HandleFunc("/api/whatsapp/stop", guard("sesiones-whatsapp", whatsappHandler.Stop))
 	mux.HandleFunc("/api/whatsapp/delete-session", guard("sesiones-whatsapp", whatsappHandler.DeleteSession))
 	mux.HandleFunc("/api/whatsapp/send", func(w http.ResponseWriter, r *http.Request) {

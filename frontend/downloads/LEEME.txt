@@ -1,0 +1,11 @@
+Carpeta de descargas de instaladores nativos de R1 Personalizados (Tauri v2).
+
+Coloca aquí los archivos generados tras compilar:
+- R1-Personalizados-Setup.exe (Windows NSIS)
+- R1-Personalizados.msi (Windows MSI)
+- R1-Personalizados.dmg (macOS Universal)
+- R1-Personalizados.AppImage (Linux x86_64)
+- r1-personalizados_amd64.deb (Debian / Ubuntu)
+- R1-Personalizados.apk (Android)
+- R1-Personalizados.ipa (iOS)
+

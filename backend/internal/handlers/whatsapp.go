@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"bytes"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -14,10 +15,12 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/crypto/bcrypt"
 	"r1/backend/internal/auth"
 )
 
 type WhatsAppHandler struct {
+	DB        *sql.DB
 	workerURL string
 	mu        sync.Mutex
 	cmd       *exec.Cmd
@@ -36,12 +39,13 @@ type WhatsAppSendPayload struct {
 	Media   *WhatsAppMediaPayload `json:"media,omitempty"`
 }
 
-func NewWhatsAppHandler() *WhatsAppHandler {
+func NewWhatsAppHandler(dbConn *sql.DB) *WhatsAppHandler {
 	port := strings.TrimSpace(os.Getenv("WA_WORKER_PORT"))
 	if port == "" {
 		port = "3009"
 	}
 	h := &WhatsAppHandler{
+		DB:        dbConn,
 		workerURL: "http://127.0.0.1:" + port,
 		client: &http.Client{
 			Timeout: 45 * time.Second,
@@ -173,6 +177,133 @@ func (h *WhatsAppHandler) Restart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.proxyRequest(w, http.MethodPost, "/restart", nil)
+}
+
+// cleanSingletonLocks busca y elimina todos los archivos de bloqueo Singleton de Chromium
+func cleanSingletonLocks() int {
+	candidates := []string{
+		"/app/backend/whatsapp-worker/.wwebjs_auth",
+		"backend/whatsapp-worker/.wwebjs_auth",
+		"whatsapp-worker/.wwebjs_auth",
+		filepath.Join(resolveWorkerDir(), ".wwebjs_auth"),
+	}
+	deleted := 0
+	seen := make(map[string]bool)
+	for _, dir := range candidates {
+		abs, err := filepath.Abs(dir)
+		if err != nil || seen[abs] {
+			continue
+		}
+		seen[abs] = true
+		if _, err := os.Stat(abs); os.IsNotExist(err) {
+			continue
+		}
+		_ = filepath.Walk(abs, func(path string, info os.FileInfo, err error) error {
+			if err != nil || info == nil {
+				return nil
+			}
+			if !info.IsDir() && strings.HasPrefix(info.Name(), "Singleton") {
+				if removeErr := os.Remove(path); removeErr == nil {
+					deleted++
+					log.Printf("[RESTART-FULL] Bloqueo residual eliminado: %s", path)
+				}
+			}
+			return nil
+		})
+	}
+	return deleted
+}
+
+// RestartFull valida la contraseña del admin, elimina bloqueos Singleton y reinicia el contenedor/servicio
+func (h *WhatsAppHandler) RestartFull(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		auth.WriteJSONError(w, http.StatusMethodNotAllowed, "método no permitido")
+		return
+	}
+
+	claims := auth.CurrentUserClaims(r)
+	if claims == nil {
+		auth.WriteJSONError(w, http.StatusUnauthorized, "no autenticado")
+		return
+	}
+
+	// Solo administradores o root pueden ejecutar el reinicio del contenedor
+	if !claims.IsRoot && claims.Role != "admin" {
+		auth.WriteJSONError(w, http.StatusForbidden, "solo los administradores pueden reiniciar el servicio y contenedor")
+		return
+	}
+
+	var req struct {
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || strings.TrimSpace(req.Password) == "" {
+		auth.WriteJSONError(w, http.StatusBadRequest, "la contraseña de administrador es obligatoria")
+		return
+	}
+
+	// 1. Validar la contraseña del admin
+	if claims.IsRoot {
+		rootHash := strings.Trim(strings.TrimSpace(os.Getenv("ROOT_PASSWORD_HASH")), "'\"")
+		if rootHash == "" || bcrypt.CompareHashAndPassword([]byte(rootHash), []byte(req.Password)) != nil {
+			auth.WriteJSONError(w, http.StatusUnauthorized, "contraseña de administrador incorrecta")
+			return
+		}
+	} else {
+		if h.DB == nil {
+			auth.WriteJSONError(w, http.StatusServiceUnavailable, "base de datos no disponible")
+			return
+		}
+		var pwdHash string
+		err := h.DB.QueryRowContext(r.Context(), "SELECT password_hash FROM users WHERE id = ? AND deleted_at IS NULL", claims.UserID).Scan(&pwdHash)
+		if err != nil || bcrypt.CompareHashAndPassword([]byte(pwdHash), []byte(req.Password)) != nil {
+			auth.WriteJSONError(w, http.StatusUnauthorized, "contraseña de administrador incorrecta")
+			return
+		}
+	}
+
+	// 2. Limpieza de archivos Singleton de Chromium
+	deletedCount := cleanSingletonLocks()
+	log.Printf("[RESTART-FULL] Eliminación de bloqueos Singleton completada: %d archivos", deletedCount)
+
+	// Ejecutar también find -delete en shell si está disponible
+	_ = exec.Command("sh", "-c", "find /app/backend/whatsapp-worker/.wwebjs_auth -name 'Singleton*' -delete").Run()
+
+	// Intentar comando docker si socket o cli está disponible
+	_ = exec.Command("docker", "exec", "-t", "r1personalizados-backend", "sh", "-c", "find /app/backend/whatsapp-worker/.wwebjs_auth -name 'Singleton*' -delete").Run()
+
+	// 3. Responder al frontend con éxito antes de apagar/reiniciar el proceso
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"ok":                true,
+		"status":            "RESTARTING",
+		"message":           "Bloqueos Singleton eliminados con éxito. Reiniciando servicio y contenedor...",
+		"deleted_locks":     deletedCount,
+		"estimated_seconds": 60,
+	})
+
+	// 4. Reinicio en goroutine con delay para permitir que la respuesta HTTP termine de enviarse
+	go func() {
+		time.Sleep(800 * time.Millisecond)
+
+		// Matar worker huérfano si existe
+		h.mu.Lock()
+		if h.cmd != nil && h.cmd.Process != nil {
+			_ = h.cmd.Process.Kill()
+		}
+		h.mu.Unlock()
+
+		// Intentar reiniciar vía Docker CLI
+		cmdDocker := exec.Command("docker", "restart", "r1personalizados-backend")
+		if err := cmdDocker.Run(); err == nil {
+			log.Println("[RESTART-FULL] Contenedor r1personalizados-backend reiniciado mediante Docker CLI")
+			return
+		}
+
+		// En contenedor Docker con restart: unless-stopped / always, salir para que Docker reinicie
+		log.Println("[RESTART-FULL] Saliendo del proceso backend para que Docker reinicie el contenedor r1personalizados-backend...")
+		os.Exit(0)
+	}()
 }
 
 func (h *WhatsAppHandler) Stop(w http.ResponseWriter, r *http.Request) {
