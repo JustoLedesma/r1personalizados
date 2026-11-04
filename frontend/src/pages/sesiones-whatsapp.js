@@ -230,7 +230,7 @@ export function renderSesionesWhatsAppModule(container) {
         </p>
         <div class="p-2.5 rounded-lg bg-amber-100/70 dark:bg-amber-900/40 border border-amber-300/60 dark:border-amber-700/60 flex items-center gap-2 text-xs font-semibold text-rose-700 dark:text-rose-300">
           <i class="fa-solid fa-circle-exclamation shrink-0"></i>
-          <span>Todo el sistema dejará de responder por 1 a 2 minutos mientras el contenedor se reinicia en el VPS.</span>
+          <span>Todo el sistema dejará de responder por 1 a 2 minutos mientras se reinicia.</span>
         </div>
       </div>
 

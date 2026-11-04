@@ -3717,89 +3717,62 @@ export function renderConfiguracionModule(container) {
   }
 
   // ============================================================================
-  // PESTAÑA 7: DESCARGAR SOFTWARE (Instaladores Nativos Tauri v2)
+  // PESTAÑA 7: DESCARGAR SOFTWARE (Instaladores Nativos)
   // ============================================================================
   function renderDescargasTab(parent) {
     const card = document.createElement('section');
     card.className =
-      'w-full bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl p-6 sm:p-8 shadow-xs space-y-8';
+      'w-full bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl p-6 sm:p-8 shadow-xs space-y-6';
 
-    // Cabecera principal
+    // Cabecera limpia (sin badges, sin subtítulo y sin accesos externos)
     const header = document.createElement('div');
     header.className =
-      'flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 pb-6 border-b border-slate-100 dark:border-slate-800';
+      'flex items-center gap-3.5 pb-4 border-b border-slate-100 dark:border-slate-800';
     header.innerHTML = `
-      <div class="flex items-start sm:items-center gap-3.5">
-        <div class="w-11 h-11 rounded-xl bg-brand-soft dark:bg-brand/20 text-brand flex items-center justify-center text-xl shrink-0">
-          <i class="fa-solid fa-cloud-arrow-down"></i>
-        </div>
-        <div>
-          <div class="flex flex-wrap items-center gap-2">
-            <h2 class="text-base sm:text-lg font-bold text-slate-900 dark:text-white">Descargar Software Nativo</h2>
-            <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-brand-soft text-brand dark:bg-brand/20">
-              <i class="fa-solid fa-shield-halved text-[10px]"></i> Tauri v2 Oficial
-            </span>
-            <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
-              <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span> Servidor Conectado
-            </span>
-          </div>
-          <p class="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-1">
-            Instaladores de escritorio y móviles optimizados para R1 Personalizados. Rendimiento nativo sin barras de navegador y a pantalla completa.
-          </p>
-        </div>
+      <div class="w-10 h-10 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-500 flex items-center justify-center text-lg shrink-0">
+        <i class="fa-solid fa-cloud-arrow-down"></i>
       </div>
-      <div class="flex flex-wrap items-center gap-2 self-start lg:self-auto">
-        <div class="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-slate-800/60 px-3 py-2 rounded-xl border border-slate-200/70 dark:border-slate-700/60">
-          <i class="fa-solid fa-server text-brand"></i>
-          <span>VPS: <strong class="text-slate-700 dark:text-slate-200 font-mono">104.168.159.69</strong></span>
-        </div>
-        <a href="https://github.com/JustoLedesma/r1personalizados/actions" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors shadow-xs">
-          <i class="fa-brands fa-github text-sm"></i>
-          <span>GitHub Actions</span>
-        </a>
-        <a href="https://github.com/JustoLedesma/r1personalizados/releases" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold bg-brand hover:bg-brand-hover text-white transition-colors shadow-xs">
-          <i class="fa-solid fa-box-archive text-sm"></i>
-          <span>Releases en la Nube</span>
-        </a>
+      <div>
+        <h2 class="text-base sm:text-lg font-bold text-slate-900 dark:text-white">Descargar Software Nativo</h2>
       </div>
     `;
     card.appendChild(header);
 
-    // Barra de Ventajas / Beneficios del software nativo
+    // Barra de Ventajas / Beneficios del software nativo (en tonos grises neutros)
     const featuresBar = document.createElement('div');
     featuresBar.className = 'grid grid-cols-1 sm:grid-cols-3 gap-4';
     featuresBar.innerHTML = `
-      <div class="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800 flex items-start gap-3">
-        <div class="w-9 h-9 rounded-lg bg-sky-100 dark:bg-sky-950/60 text-sky-600 dark:text-sky-400 flex items-center justify-center shrink-0">
+      <div class="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200/70 dark:border-slate-800 flex items-start gap-3">
+        <div class="w-9 h-9 rounded-lg bg-slate-200/70 dark:bg-slate-700/60 text-slate-500 dark:text-slate-400 flex items-center justify-center shrink-0">
           <i class="fa-solid fa-expand"></i>
         </div>
         <div>
-          <h4 class="text-xs font-bold text-slate-800 dark:text-slate-200">Pantalla Completa Nativa</h4>
-          <p class="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">Sin barras de navegación ni menús nativos que distraigan al usuario.</p>
+          <h4 class="text-xs font-bold text-slate-600 dark:text-slate-300">Pantalla Completa Nativa</h4>
+          <p class="text-[11px] text-slate-400 dark:text-slate-500 mt-0.5">Sin barras de navegación ni menús nativos que distraigan al usuario.</p>
         </div>
       </div>
-      <div class="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800 flex items-start gap-3">
-        <div class="w-9 h-9 rounded-lg bg-emerald-100 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
+      <div class="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200/70 dark:border-slate-800 flex items-start gap-3">
+        <div class="w-9 h-9 rounded-lg bg-slate-200/70 dark:bg-slate-700/60 text-slate-500 dark:text-slate-400 flex items-center justify-center shrink-0">
           <i class="fa-solid fa-bolt"></i>
         </div>
         <div>
-          <h4 class="text-xs font-bold text-slate-800 dark:text-slate-200">Consumo Ultraligero</h4>
-          <p class="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">Motor Tauri v2 optimizado: utiliza ~30MB de memoria RAM frente a navegadores pesados.</p>
+          <h4 class="text-xs font-bold text-slate-600 dark:text-slate-300">Consumo Ultraligero</h4>
+          <p class="text-[11px] text-slate-400 dark:text-slate-500 mt-0.5">Motor optimizado: utiliza ~30MB de memoria RAM frente a navegadores pesados.</p>
         </div>
       </div>
-      <div class="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800 flex items-start gap-3">
-        <div class="w-9 h-9 rounded-lg bg-purple-100 dark:bg-purple-950/60 text-purple-600 dark:text-purple-400 flex items-center justify-center shrink-0">
+      <div class="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200/70 dark:border-slate-800 flex items-start gap-3">
+        <div class="w-9 h-9 rounded-lg bg-slate-200/70 dark:bg-slate-700/60 text-slate-500 dark:text-slate-400 flex items-center justify-center shrink-0">
           <i class="fa-solid fa-rotate"></i>
         </div>
         <div>
-          <h4 class="text-xs font-bold text-slate-800 dark:text-slate-200">Sincronización Continua</h4>
-          <p class="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">Carga directa desde tu VPS; toda mejora o cambio en el sistema se refleja al instante.</p>
+          <h4 class="text-xs font-bold text-slate-600 dark:text-slate-300">Sincronización Continua</h4>
+          <p class="text-[11px] text-slate-400 dark:text-slate-500 mt-0.5">Carga directa desde tu VPS; toda mejora o cambio en el sistema se refleja al instante.</p>
         </div>
       </div>
     `;
     card.appendChild(featuresBar);
 
-    // Listado de Plataformas e Instaladores
+    // Listado de Plataformas e Instaladores en tono gris inhabilitado
     const platformsGrid = document.createElement('div');
     platformsGrid.className = 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6';
 
@@ -3808,15 +3781,12 @@ export function renderConfiguracionModule(container) {
         id: 'windows',
         name: 'Windows',
         badge: 'Recomendado PC',
-        badgeClass: 'bg-sky-50 text-sky-700 dark:bg-sky-950/60 dark:text-sky-300 border-sky-200 dark:border-sky-800',
-        icon: 'fa-brands fa-windows text-sky-500',
+        icon: 'fa-brands fa-windows',
         subtitle: 'Windows 10 / Windows 11 (64-bit)',
         format: 'Instalador .exe (NSIS)',
         size: '~4.8 MB',
         description: 'Instalador estándar de un solo clic con acceso directo al escritorio y aceleración WebView2.',
-        primaryUrl: 'http://104.168.159.69/r1personalizados/downloads/R1-Personalizados-Setup.exe',
         primaryBtnText: 'Descargar .EXE',
-        secondaryUrl: 'http://104.168.159.69/r1personalizados/downloads/R1-Personalizados.msi',
         secondaryBtnText: 'Paquete .MSI',
         tip: 'Si Windows SmartScreen muestra advertencia al abrir por primera vez, haz clic en "Más información" y "Ejecutar de todas formas".',
       },
@@ -3824,15 +3794,12 @@ export function renderConfiguracionModule(container) {
         id: 'macos',
         name: 'macOS',
         badge: 'Universal',
-        badgeClass: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 border-slate-200 dark:border-slate-700',
-        icon: 'fa-brands fa-apple text-slate-800 dark:text-slate-200',
+        icon: 'fa-brands fa-apple',
         subtitle: 'Apple Silicon (M1-M4) & Intel',
         format: 'Imagen de Disco .dmg',
         size: '~7.2 MB',
         description: 'Binario universal de alto rendimiento compatible con macOS Ventura, Sonoma y Sequoia.',
-        primaryUrl: 'http://104.168.159.69/r1personalizados/downloads/R1-Personalizados.dmg',
         primaryBtnText: 'Descargar .DMG',
-        secondaryUrl: 'http://104.168.159.69/r1personalizados/downloads/R1-Personalizados-mac.zip',
         secondaryBtnText: 'Archivo .ZIP',
         tip: 'Abre el archivo .dmg y arrastra R1 Personalizados a tu carpeta de Aplicaciones.',
       },
@@ -3840,15 +3807,12 @@ export function renderConfiguracionModule(container) {
         id: 'linux',
         name: 'Linux',
         badge: 'Multi-Distro',
-        badgeClass: 'bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300 border-amber-200 dark:border-amber-800',
-        icon: 'fa-brands fa-linux text-amber-500',
+        icon: 'fa-brands fa-linux',
         subtitle: 'Ubuntu, Debian, Fedora, Arch',
         format: 'AppImage Portable / .deb',
         size: '~12.5 MB',
         description: 'Ejecutable sin instalación (AppImage) o paquete nativo Debian/Ubuntu compatible con x86_64.',
-        primaryUrl: 'http://104.168.159.69/r1personalizados/downloads/R1-Personalizados.AppImage',
         primaryBtnText: 'Descargar AppImage',
-        secondaryUrl: 'http://104.168.159.69/r1personalizados/downloads/r1-personalizados_amd64.deb',
         secondaryBtnText: 'Paquete .DEB',
         tip: 'Recuerda otorgar permisos de ejecución al AppImage ejecutando: chmod +x R1-Personalizados.AppImage.',
       },
@@ -3856,15 +3820,12 @@ export function renderConfiguracionModule(container) {
         id: 'android',
         name: 'Android',
         badge: 'Móvil & Tablet',
-        badgeClass: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800',
-        icon: 'fa-brands fa-android text-emerald-500',
+        icon: 'fa-brands fa-android',
         subtitle: 'Android 8.0 o superior',
         format: 'Paquete APK Universal',
         size: '~6.5 MB',
         description: 'Ideal para tablets en mostrador de atención, tablets de taller de confección y celulares de asesores.',
-        primaryUrl: 'http://104.168.159.69/r1personalizados/downloads/R1-Personalizados.apk',
         primaryBtnText: 'Descargar APK',
-        secondaryUrl: 'http://104.168.159.69/r1personalizados',
         secondaryBtnText: 'Abrir en Navegador',
         tip: 'Al descargar en tu teléfono o tablet, habilita "Permitir instalación de fuentes desconocidas".',
       },
@@ -3872,15 +3833,12 @@ export function renderConfiguracionModule(container) {
         id: 'ios',
         name: 'Apple iOS',
         badge: 'iPhone & iPad',
-        badgeClass: 'bg-indigo-50 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800',
-        icon: 'fa-solid fa-mobile-screen-button text-indigo-500',
+        icon: 'fa-solid fa-mobile-screen-button',
         subtitle: 'iOS 15+ / iPadOS',
         format: 'Paquete .ipa / PWA Directa',
         size: '~8.0 MB',
         description: 'Experiencia táctil a pantalla completa optimizada para tablets iPad de ventas y iPhones.',
-        primaryUrl: 'http://104.168.159.69/r1personalizados/downloads/R1-Personalizados.ipa',
         primaryBtnText: 'Descargar .IPA',
-        secondaryUrl: 'http://104.168.159.69/r1personalizados',
         secondaryBtnText: 'Instalar como PWA (Safari)',
         tip: 'También puedes abrir la URL en Safari en iOS, pulsar el icono Compartir y seleccionar "Añadir a pantalla de inicio".',
       },
@@ -3889,79 +3847,68 @@ export function renderConfiguracionModule(container) {
     PLATFORMS.forEach((item) => {
       const pCard = document.createElement('div');
       pCard.className =
-        'flex flex-col justify-between p-5 sm:p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 hover:border-brand/40 dark:hover:border-brand/40 shadow-xs hover:shadow-md transition-all duration-200 group';
+        'flex flex-col justify-between p-5 sm:p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 shadow-xs opacity-90 transition-all select-none';
 
-      // Parte superior de la tarjeta
+      // Parte superior de la tarjeta (en tonos grises)
       const topDiv = document.createElement('div');
       topDiv.className = 'space-y-4';
       topDiv.innerHTML = `
         <div class="flex items-center justify-between">
-          <div class="w-12 h-12 rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-100 dark:border-slate-700/60 flex items-center justify-center text-2xl group-hover:scale-105 transition-transform">
+          <div class="w-12 h-12 rounded-xl bg-slate-100 dark:bg-slate-800/80 border border-slate-200/70 dark:border-slate-700/60 flex items-center justify-center text-2xl text-slate-400 dark:text-slate-500">
             <i class="${item.icon}"></i>
           </div>
-          <span class="inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-semibold border ${item.badgeClass}">
+          <span class="inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-semibold border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400">
             ${item.badge}
           </span>
         </div>
 
         <div>
-          <h3 class="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+          <h3 class="text-base font-bold text-slate-700 dark:text-slate-300 flex items-center gap-2">
             ${item.name}
           </h3>
-          <p class="text-xs font-medium text-slate-500 dark:text-slate-400 mt-0.5">
+          <p class="text-xs font-medium text-slate-400 dark:text-slate-500 mt-0.5">
             ${item.subtitle}
           </p>
         </div>
 
-        <p class="text-xs text-slate-600 dark:text-slate-300 leading-relaxed min-h-[38px]">
+        <p class="text-xs text-slate-400 dark:text-slate-500 leading-relaxed min-h-[38px]">
           ${item.description}
         </p>
 
-        <div class="flex items-center justify-between py-2.5 px-3 rounded-lg bg-slate-50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-800 text-[11px]">
-          <span class="text-slate-500 dark:text-slate-400">Formato: <strong class="text-slate-700 dark:text-slate-300 font-mono">${item.format}</strong></span>
+        <div class="flex items-center justify-between py-2.5 px-3 rounded-lg bg-slate-100/60 dark:bg-slate-800/50 border border-slate-200/60 dark:border-slate-700/60 text-[11px]">
+          <span class="text-slate-400 dark:text-slate-500">Formato: <strong class="text-slate-500 dark:text-slate-400 font-mono">${item.format}</strong></span>
           <span class="text-slate-400 font-mono">${item.size}</span>
         </div>
       `;
       pCard.appendChild(topDiv);
 
-      // Parte inferior (Botones de acción e instrucciones)
+      // Parte inferior (Botones inhabilitados en tono gris)
       const bottomDiv = document.createElement('div');
-      bottomDiv.className = 'mt-5 pt-4 border-t border-slate-100 dark:border-slate-800 space-y-3';
+      bottomDiv.className = 'mt-5 pt-4 border-t border-slate-100 dark:border-slate-800 space-y-2.5';
 
-      // Botón Primario de Descarga (#a37cfc obligatorio según AGENTS.md)
-      const downloadBtn = createButton({
-        text: item.primaryBtnText,
-        icon: 'fa-solid fa-download',
-        variant: 'primary',
-        fullWidth: true,
-        onClick: () => {
-          const a = document.createElement('a');
-          a.href = item.primaryUrl;
-          a.download = '';
-          a.target = '_blank';
-          document.body.appendChild(a);
-          a.click();
-          document.body.removeChild(a);
-        },
-      });
+      // Botón Primario Inhabilitado en tono gris
+      const downloadBtn = document.createElement('button');
+      downloadBtn.type = 'button';
+      downloadBtn.disabled = true;
+      downloadBtn.setAttribute('aria-disabled', 'true');
+      downloadBtn.className =
+        'w-full inline-flex items-center justify-center gap-2 rounded-lg font-semibold py-2 px-4 text-sm bg-slate-200 dark:bg-slate-800 text-slate-400 dark:text-slate-500 border border-slate-300/70 dark:border-slate-700/80 cursor-not-allowed select-none opacity-90 shadow-none';
+      downloadBtn.innerHTML = `<i class="fa-solid fa-download text-xs"></i> <span>${item.primaryBtnText}</span>`;
       bottomDiv.appendChild(downloadBtn);
 
-      // Botón Secundario / Alternativo
-      if (item.secondaryUrl) {
-        const altBtn = createButton({
-          text: item.secondaryBtnText,
-          icon: 'fa-solid fa-arrow-up-right-from-square',
-          variant: 'cancel',
-          size: 'sm',
-          fullWidth: true,
-          onClick: () => {
-            window.open(item.secondaryUrl, '_blank');
-          },
-        });
+      // Botón Secundario Inhabilitado en tono gris
+      if (item.secondaryBtnText) {
+        const altBtn = document.createElement('button');
+        altBtn.type = 'button';
+        altBtn.disabled = true;
+        altBtn.setAttribute('aria-disabled', 'true');
+        altBtn.className =
+          'w-full inline-flex items-center justify-center gap-2 rounded-lg font-semibold py-1.5 px-3 text-xs bg-slate-100 dark:bg-slate-800/60 text-slate-400 dark:text-slate-500 border border-slate-200 dark:border-slate-700/60 cursor-not-allowed select-none opacity-80 shadow-none';
+        altBtn.innerHTML = `<i class="fa-solid fa-arrow-up-right-from-square text-[10px]"></i> <span>${item.secondaryBtnText}</span>`;
         bottomDiv.appendChild(altBtn);
       }
 
-      // Tip / Nota de instalación
+      // Tip / Nota de instalación (en tono tenue)
       const tipDiv = document.createElement('div');
       tipDiv.className = 'flex items-start gap-1.5 text-[11px] text-slate-400 dark:text-slate-500 leading-tight pt-1';
       tipDiv.innerHTML = `
@@ -3975,44 +3922,6 @@ export function renderConfiguracionModule(container) {
     });
 
     card.appendChild(platformsGrid);
-
-    // Pie con sección explicativa sobre cómo compilar nuevas versiones
-    const compileInfo = document.createElement('div');
-    compileInfo.className =
-      'p-5 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200/80 dark:border-slate-800 space-y-3';
-    compileInfo.innerHTML = `
-      <div class="flex items-center gap-2.5">
-        <div class="w-8 h-8 rounded-lg bg-brand-soft dark:bg-brand/20 text-brand flex items-center justify-center text-sm">
-          <i class="fa-solid fa-terminal"></i>
-        </div>
-        <h4 class="text-xs sm:text-sm font-bold text-slate-800 dark:text-slate-200">
-          Comandos de Compilación Tauri v2 (Para Desarrolladores / Administrador)
-        </h4>
-      </div>
-      <p class="text-xs text-slate-500 dark:text-slate-400">
-        El proyecto está configurado con Tauri v2 en <code class="px-1.5 py-0.5 rounded bg-slate-200 dark:bg-slate-700 font-mono text-[11px]">/src-tauri</code> apuntando directamente a la URL de producción. Puedes generar nuevos paquetes ejecutando en la consola:
-      </p>
-      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-2.5 font-mono text-[11px]">
-        <div class="p-2.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700/60">
-          <span class="text-slate-400 block text-[10px] uppercase font-sans font-bold">Windows (.exe / .msi)</span>
-          <span class="text-brand">cargo tauri build</span>
-        </div>
-        <div class="p-2.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700/60">
-          <span class="text-slate-400 block text-[10px] uppercase font-sans font-bold">macOS (.dmg)</span>
-          <span class="text-brand">cargo tauri build</span>
-        </div>
-        <div class="p-2.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700/60">
-          <span class="text-slate-400 block text-[10px] uppercase font-sans font-bold">Linux (.deb / AppImage)</span>
-          <span class="text-brand">cargo tauri build</span>
-        </div>
-        <div class="p-2.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700/60">
-          <span class="text-slate-400 block text-[10px] uppercase font-sans font-bold">Android (.apk)</span>
-          <span class="text-brand">cargo tauri android build --apk</span>
-        </div>
-      </div>
-    `;
-    card.appendChild(compileInfo);
-
     parent.appendChild(card);
   }
 
