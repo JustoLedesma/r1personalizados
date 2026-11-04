@@ -236,6 +236,21 @@ async function ensureWWebJSPatched() {
           mediaHandle: sendToChannel ? mediaEntry.handle : null,
         });
 
+        // Limpiar __x_id e id de mediaData para evitar colisión en los getters de memoización de WhatsApp Web
+        try {
+          delete mediaData.__x_id;
+          delete mediaData.id;
+          if (typeof mediaData.toJSON === 'function') {
+            const origToJSON = mediaData.toJSON.bind(mediaData);
+            mediaData.toJSON = function () {
+              const res = origToJSON() || {};
+              delete res.__x_id;
+              delete res.id;
+              return res;
+            };
+          }
+        } catch (_) {}
+
         return mediaData;
       };
 
@@ -266,6 +281,26 @@ async function ensureWWebJSPatched() {
           ? await window.WWebJS.getChatModel(chat, { isChannel })
           : chat;
       };
+
+      // Parchear WAWebSendMsgChatAction para sanitizar el payload del mensaje antes de la memoización de WhatsApp
+      try {
+        const sendModule = window.require('WAWebSendMsgChatAction');
+        if (sendModule && sendModule.addAndSendMsgToChat && !sendModule._origAddAndSend) {
+          sendModule._origAddAndSend = sendModule.addAndSendMsgToChat;
+          sendModule.addAndSendMsgToChat = function (chat, msg) {
+            if (msg && typeof msg === 'object') {
+              try {
+                delete msg.__x_id;
+                if (msg.mediaData && typeof msg.mediaData === 'object') {
+                  delete msg.mediaData.__x_id;
+                  delete msg.mediaData.id;
+                }
+              } catch (_) {}
+            }
+            return sendModule._origAddAndSend.apply(this, arguments);
+          };
+        }
+      } catch (_) {}
     });
     return;
   } catch (err) {
