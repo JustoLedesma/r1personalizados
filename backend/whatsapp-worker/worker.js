@@ -31,32 +31,74 @@ try {
         });
       if (abort.signal.aborted) return;
 
+      // 1. Esperar primero a que el DOM inicial de WhatsApp Web (#app) renderice sus módulos base.
+      // IMPORTANTE: En WhatsApp Web 2.3000.1053430300+, llamar a window.require('WAWebSocketModel')
+      // antes de que #app termine su carga diferida hace que el cargador de módulos de Meta
+      // guarde en caché `exports = null` permanentemente durante toda la vida de la página.
+      await this.pupPage
+        .waitForFunction(
+          () => {
+            const app = document.querySelector('#app');
+            if (!app || app.children.length === 0) return false;
+            return Boolean(
+              app.querySelector('canvas') ||
+                app.querySelector('[data-ref]') ||
+                app.querySelector('#side') ||
+                app.querySelector('[data-testid]') ||
+                (app.innerText && app.innerText.trim().length > 20)
+            );
+          },
+          { timeout: authTimeout }
+        )
+        .catch((err) => {
+          if (abort.signal.aborted) throw err;
+          throw new Error('Tiempo de espera agotado esperando renderizado inicial de WhatsApp Web');
+        });
+      if (abort.signal.aborted) return;
+
       await this.setDeviceName(this.options.deviceName, this.options.browserName);
       const pairWithPhoneNumber = this.options.pairWithPhoneNumber;
       const version = await this.getWWebVersion();
 
-      // Esperar a que WhatsApp Web termine de registrar WAWebSocketModel y los módulos de QR reales
+      // 2. Esperar a que WAWebSocketModel y los módulos de autenticación estén listos.
+      // En WhatsApp Web 2.3000.1053430300+, cuando la sesión NO está vinculada (!isRegistered),
+      // WAWebSocketModel.Socket.state permanece en 'PAIRING' mientras muestra el código QR.
       const needAuthHandle = await this.pupPage.waitForFunction(
         () => {
           try {
             if (typeof window.require !== 'function') return false;
             const ws = window.require('WAWebSocketModel');
-            const state = ws && ws.Socket ? ws.Socket.state : null;
-            if (!state || state === 'OPENING' || state === 'UNLAUNCHED' || state === 'PAIRING') {
-              return false;
-            }
             const conn = window.require('WAWebConnModel');
             const cmd = window.require('WAWebCmd');
             const sig = window.require('WAWebSignalStoreApi');
             const info = window.require('WAWebUserPrefsInfoStore');
             const b64 = window.require('WABase64');
             const md = window.require('WAWebUserPrefsMultiDevice');
-            if (!conn || !conn.Conn || !cmd || !cmd.Cmd || !sig || !sig.waSignalStore || !info || !info.waNoiseInfo || !b64 || !md) {
+            if (
+              !ws ||
+              !ws.Socket ||
+              !conn ||
+              !conn.Conn ||
+              !cmd ||
+              !cmd.Cmd ||
+              !sig ||
+              !sig.waSignalStore ||
+              !info ||
+              !info.waNoiseInfo ||
+              !b64 ||
+              !md
+            ) {
+              return false;
+            }
+            const state = ws.Socket.state;
+            const isRegistered = Boolean(typeof md.isRegistered === 'function' && md.isRegistered());
+            if (!state || state === 'OPENING' || state === 'UNLAUNCHED' || (state === 'PAIRING' && isRegistered)) {
               return false;
             }
             return {
-              need: state === 'UNPAIRED' || state === 'UNPAIRED_IDLE',
-              state
+              need: !isRegistered || state === 'UNPAIRED' || state === 'UNPAIRED_IDLE' || state === 'PAIRING',
+              state,
+              isRegistered
             };
           } catch (_) {
             return false;
