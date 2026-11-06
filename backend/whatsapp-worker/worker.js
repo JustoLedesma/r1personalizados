@@ -4,6 +4,83 @@ const path = require('path');
 const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
 const QRCode = require('qrcode');
 
+// --- PARCHE PREVENTIVO CONTRA ERROR DE NULL POINTER EN WAWebSocketModel.Socket ---
+try {
+  const authStoreModule = require('whatsapp-web.js/src/util/Injected/AuthStore/AuthStore');
+  authStoreModule.ExposeAuthStore = () => {
+    window.AuthStore = window.AuthStore || {};
+    const safeReq = (name) => {
+      try {
+        return typeof window.require === 'function' ? window.require(name) : null;
+      } catch (_) {
+        return null;
+      }
+    };
+    const ws = safeReq('WAWebSocketModel');
+    window.AuthStore.AppState = ws && ws.Socket ? ws.Socket : { state: 'UNPAIRED', on: () => {}, off: () => {} };
+    const cmd = safeReq('WAWebCmd');
+    window.AuthStore.Cmd = cmd && cmd.Cmd ? cmd.Cmd : {};
+    const conn = safeReq('WAWebConnModel');
+    window.AuthStore.Conn = conn && conn.Conn ? conn.Conn : {};
+    const off = safeReq('WAWebOfflineHandler');
+    window.AuthStore.OfflineMessageHandler = off && off.OfflineMessageHandler ? off.OfflineMessageHandler : {};
+    window.AuthStore.PairingCodeLinkUtils = safeReq('WAWebAltDeviceLinkingApi') || {};
+    window.AuthStore.Base64Tools = safeReq('WABase64') || {};
+    window.AuthStore.RegistrationUtils = {
+      ...(safeReq('WAWebCompanionRegClientUtils') || {}),
+      ...(safeReq('WAWebAdvSignatureApi') || {}),
+      ...(safeReq('WAWebUserPrefsInfoStore') || {}),
+      ...(safeReq('WAWebSignalStoreApi') || {})
+    };
+  };
+
+  const _origInject = Client.prototype.inject;
+  Client.prototype.inject = async function () {
+    if (this.pupPage) {
+      await this.pupPage
+        .waitForFunction(
+          () => {
+            return typeof window.require === 'function';
+          },
+          { timeout: 30000 }
+        )
+        .catch(() => {});
+
+      await this.pupPage
+        .evaluate(() => {
+          if (typeof window.require === 'function' && !window.require._isSocketPatched) {
+            const _origReq = window.require;
+            const fakeSocket = {
+              state: 'UNPAIRED',
+              on: function () {},
+              off: function () {},
+              takeover: function () {},
+              reconnect: function () {}
+            };
+            const patchedReq = function (name) {
+              let mod = null;
+              try {
+                mod = _origReq.apply(this, arguments);
+              } catch (_) {}
+              if ((!mod || !mod.Socket) && name === 'WAWebSocketModel') {
+                return { Socket: fakeSocket };
+              }
+              return mod;
+            };
+            Object.assign(patchedReq, _origReq);
+            patchedReq._isSocketPatched = true;
+            window.require = patchedReq;
+          }
+        })
+        .catch(() => {});
+    }
+    return await _origInject.apply(this, arguments);
+  };
+  console.log('[WA-WORKER] Parches preventivos de WAWebSocketModel aplicados con éxito.');
+} catch (err) {
+  console.warn('[WA-WORKER] Error al aplicar parches preventivos:', err.message);
+}
+
 const PORT = parseInt(process.env.WA_WORKER_PORT || '3009', 10);
 const AUTH_DIR = path.join(__dirname, '.wwebjs_auth');
 
