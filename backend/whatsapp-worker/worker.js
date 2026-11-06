@@ -11,6 +11,11 @@ let client = null;
 let isStarting = false;
 let manualStopped = false;
 let isRestartingMode = false;
+let wwebjsVersion = 'desconocido';
+try {
+  wwebjsVersion = require('whatsapp-web.js/package.json').version;
+} catch (_) {}
+
 let state = {
   status: 'DISCONNECTED', // DISCONNECTED | STOPPED | RESTARTING | INITIALIZING | QR_READY | AUTHENTICATED | CONNECTED
   connected: false,
@@ -20,7 +25,8 @@ let state = {
   qrUpdatedAt: null,
   account: null,
   lastError: '',
-  browserPath: ''
+  browserPath: '',
+  installedVersion: wwebjsVersion
 };
 
 function findBrowserExecutable() {
@@ -592,6 +598,7 @@ async function startClient({ asRestart = false } = {}) {
         clientId: 'netz-r1-main',
         dataPath: AUTH_DIR
       }),
+      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
       puppeteer: puppeteerOpts
     });
 
@@ -681,7 +688,7 @@ async function startClient({ asRestart = false } = {}) {
       state.restartStartedAt = null;
       state.status = 'DISCONNECTED';
       state.connected = false;
-      state.lastError = 'No se pudo iniciar el navegador en segundo plano: ' + (err.message || String(err));
+      state.lastError = `No se pudo iniciar el navegador en segundo plano (v${wwebjsVersion}): ` + (err.message || String(err));
       client = null;
     });
   } catch (err) {
