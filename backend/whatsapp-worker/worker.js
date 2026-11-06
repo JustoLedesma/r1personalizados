@@ -507,6 +507,15 @@ async function populateAccountInfo() {
   };
 }
 
+function killOrphanedChromium() {
+  if (process.platform === 'linux') {
+    try {
+      const { execSync } = require('child_process');
+      execSync('pkill -9 -f chromium || true', { stdio: 'ignore' });
+    } catch (_) {}
+  }
+}
+
 function removeSingletonLocks(targetDir = AUTH_DIR) {
   try {
     if (!fs.existsSync(targetDir)) return;
@@ -553,6 +562,7 @@ async function startClient({ asRestart = false } = {}) {
 
   const puppeteerOpts = {
     headless: true,
+    timeout: 60000,
     args: [
       '--no-sandbox',
       '--disable-setuid-sandbox',
@@ -746,6 +756,10 @@ async function deleteSessionAndRestart() {
     client = null;
   }
 
+  // Matar procesos Chromium colgados y liberar descriptores
+  killOrphanedChromium();
+  await new Promise((r) => setTimeout(r, 1000));
+
   state.status = 'DISCONNECTED';
   state.connected = false;
   state.qrRaw = '';
@@ -760,6 +774,8 @@ async function deleteSessionAndRestart() {
   } catch (err) {
     state.lastError = 'Aviso al limpiar credenciales locales: ' + (err.message || String(err));
   }
+
+  removeSingletonLocks(AUTH_DIR);
 
   // Iniciar automáticamente una nueva sesión para mostrar el QR de inmediato
   await startClient({ asRestart: false });

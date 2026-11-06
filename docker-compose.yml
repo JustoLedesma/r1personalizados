@@ -42,7 +42,7 @@ services:
         FROM node:20-slim
         WORKDIR /app
         RUN apt-get update && apt-get install -y \
-            chromium fonts-ipafont-gothic fonts-wqy-zenhei fonts-thai-tlwg fonts-kacst fonts-freefont-ttf libxss1 ca-certificates tzdata ffmpeg --no-install-recommends && rm -rf /var/lib/apt/lists/*
+            chromium procps fonts-ipafont-gothic fonts-wqy-zenhei fonts-thai-tlwg fonts-kacst fonts-freefont-ttf libxss1 ca-certificates tzdata ffmpeg --no-install-recommends && rm -rf /var/lib/apt/lists/*
         ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
             PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
         COPY --from=builder /app/server .
@@ -53,6 +53,8 @@ services:
         CMD ["./server"]
     container_name: r1personalizados-backend
     restart: always
+    shm_size: '2gb'
+    ipc: host
     env_file:
       - ./backend/.env
     depends_on:
