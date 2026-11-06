@@ -79,7 +79,7 @@ func resolveWorkerDir() string {
 }
 
 func (h *WhatsAppHandler) isWorkerReachable() bool {
-	shortClient := &http.Client{Timeout: 1500 * time.Millisecond}
+	shortClient := &http.Client{Timeout: 4000 * time.Millisecond}
 	resp, err := shortClient.Get(h.workerURL + "/status")
 	if err != nil {
 		return false
@@ -98,6 +98,12 @@ func (h *WhatsAppHandler) ensureWorkerRunning() error {
 
 	if h.isWorkerReachable() {
 		return nil
+	}
+
+	if h.cmd != nil && h.cmd.Process != nil {
+		_ = h.cmd.Process.Kill()
+		_, _ = h.cmd.Process.Wait()
+		h.cmd = nil
 	}
 
 	workerDir := resolveWorkerDir()

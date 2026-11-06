@@ -4,81 +4,280 @@ const path = require('path');
 const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
 const QRCode = require('qrcode');
 
-// --- PARCHE PREVENTIVO CONTRA ERROR DE NULL POINTER EN WAWebSocketModel.Socket ---
+// --- PARCHE OFICIAL WWEBJS MAIN PARA ESPERAR MÓDULOS INTERNOS Y GENERAR QR ---
 try {
-  const authStoreModule = require('whatsapp-web.js/src/util/Injected/AuthStore/AuthStore');
-  authStoreModule.ExposeAuthStore = () => {
-    window.AuthStore = window.AuthStore || {};
-    const safeReq = (name) => {
-      try {
-        return typeof window.require === 'function' ? window.require(name) : null;
-      } catch (_) {
-        return null;
-      }
-    };
-    const ws = safeReq('WAWebSocketModel');
-    window.AuthStore.AppState = ws && ws.Socket ? ws.Socket : { state: 'UNPAIRED', on: () => {}, off: () => {} };
-    const cmd = safeReq('WAWebCmd');
-    window.AuthStore.Cmd = cmd && cmd.Cmd ? cmd.Cmd : {};
-    const conn = safeReq('WAWebConnModel');
-    window.AuthStore.Conn = conn && conn.Conn ? conn.Conn : {};
-    const off = safeReq('WAWebOfflineHandler');
-    window.AuthStore.OfflineMessageHandler = off && off.OfflineMessageHandler ? off.OfflineMessageHandler : {};
-    window.AuthStore.PairingCodeLinkUtils = safeReq('WAWebAltDeviceLinkingApi') || {};
-    window.AuthStore.Base64Tools = safeReq('WABase64') || {};
-    window.AuthStore.RegistrationUtils = {
-      ...(safeReq('WAWebCompanionRegClientUtils') || {}),
-      ...(safeReq('WAWebAdvSignatureApi') || {}),
-      ...(safeReq('WAWebUserPrefsInfoStore') || {}),
-      ...(safeReq('WAWebSignalStoreApi') || {})
-    };
-  };
+  const { Events } = require('whatsapp-web.js/src/util/Constants');
+  const { ExposeAuthStore } = require('whatsapp-web.js/src/util/Injected/AuthStore/AuthStore');
+  const { LoadUtils } = require('whatsapp-web.js/src/util/Injected/Utils');
+  const WebCacheFactory = require('whatsapp-web.js/src/webCache/WebCacheFactory');
+  const { ClientInfo } = require('whatsapp-web.js/src/structures');
+  const InterfaceController = require('whatsapp-web.js/src/util/InterfaceController');
+  const { exposeFunctionIfAbsent } = require('whatsapp-web.js/src/util/Puppeteer');
 
-  const _origInject = Client.prototype.inject;
   Client.prototype.inject = async function () {
-    if (this.pupPage) {
-      await this.pupPage
-        .waitForFunction(
-          () => {
-            return typeof window.require === 'function';
-          },
-          { timeout: 30000 }
-        )
-        .catch(() => {});
+    if (this._injectAbort) this._injectAbort.abort();
+    const abort = new AbortController();
+    this._injectAbort = abort;
 
+    try {
+      const authTimeout = this.options.authTimeoutMs || 60000;
       await this.pupPage
-        .evaluate(() => {
-          if (typeof window.require === 'function' && !window.require._isSocketPatched) {
-            const _origReq = window.require;
-            const fakeSocket = {
-              state: 'UNPAIRED',
-              on: function () {},
-              off: function () {},
-              takeover: function () {},
-              reconnect: function () {}
-            };
-            const patchedReq = function (name) {
-              let mod = null;
-              try {
-                mod = _origReq.apply(this, arguments);
-              } catch (_) {}
-              if ((!mod || !mod.Socket) && name === 'WAWebSocketModel') {
-                return { Socket: fakeSocket };
-              }
-              return mod;
-            };
-            Object.assign(patchedReq, _origReq);
-            patchedReq._isSocketPatched = true;
-            window.require = patchedReq;
-          }
+        .waitForFunction('window.Debug?.VERSION != undefined', {
+          timeout: authTimeout
         })
-        .catch(() => {});
+        .catch((err) => {
+          if (abort.signal.aborted) throw err;
+          throw new Error('Tiempo de espera agotado esperando Debug.VERSION de WhatsApp Web');
+        });
+      if (abort.signal.aborted) return;
+
+      await this.setDeviceName(this.options.deviceName, this.options.browserName);
+      const pairWithPhoneNumber = this.options.pairWithPhoneNumber;
+      const version = await this.getWWebVersion();
+
+      // Esperar a que WhatsApp Web termine de registrar WAWebSocketModel y los módulos de QR reales
+      const needAuthHandle = await this.pupPage.waitForFunction(
+        () => {
+          try {
+            if (typeof window.require !== 'function') return false;
+            const ws = window.require('WAWebSocketModel');
+            const state = ws && ws.Socket ? ws.Socket.state : null;
+            if (!state || state === 'OPENING' || state === 'UNLAUNCHED' || state === 'PAIRING') {
+              return false;
+            }
+            const conn = window.require('WAWebConnModel');
+            const cmd = window.require('WAWebCmd');
+            const sig = window.require('WAWebSignalStoreApi');
+            const info = window.require('WAWebUserPrefsInfoStore');
+            const b64 = window.require('WABase64');
+            const md = window.require('WAWebUserPrefsMultiDevice');
+            if (!conn || !conn.Conn || !cmd || !cmd.Cmd || !sig || !sig.waSignalStore || !info || !info.waNoiseInfo || !b64 || !md) {
+              return false;
+            }
+            return {
+              need: state === 'UNPAIRED' || state === 'UNPAIRED_IDLE',
+              state
+            };
+          } catch (_) {
+            return false;
+          }
+        },
+        { timeout: authTimeout }
+      );
+      if (abort.signal.aborted) return;
+      const needAuthentication = await needAuthHandle.jsonValue();
+
+      // Exponer window.AuthStore cuando todos los módulos reales ya están listos
+      await this.pupPage.evaluate(ExposeAuthStore);
+
+      if (needAuthentication.need) {
+        const { failed, failureEventPayload, restart } = await this.authStrategy.onAuthenticationNeeded();
+
+        if (failed) {
+          this.emit(Events.AUTHENTICATION_FAILURE, failureEventPayload);
+          await this.destroy();
+          if (restart) {
+            return this.initialize();
+          }
+          return;
+        }
+
+        if (pairWithPhoneNumber && pairWithPhoneNumber.phoneNumber) {
+          await exposeFunctionIfAbsent(this.pupPage, 'onCodeReceivedEvent', async (code) => {
+            this.emit(Events.CODE_RECEIVED, code);
+            return code;
+          });
+          this.requestPairingCode(
+            pairWithPhoneNumber.phoneNumber,
+            pairWithPhoneNumber.showNotification,
+            pairWithPhoneNumber.intervalMs
+          );
+        } else {
+          let qrRetries = 0;
+
+          await exposeFunctionIfAbsent(this.pupPage, 'onQRChangedEvent', async (qr) => {
+            if (!qr || String(qr).startsWith('undefined,') || String(qr).startsWith('null,')) return;
+            this.emit(Events.QR_RECEIVED, qr);
+            if (this.options.qrMaxRetries > 0) {
+              qrRetries++;
+              if (qrRetries > this.options.qrMaxRetries) {
+                this.emit(Events.DISCONNECTED, 'Max qrcode retries reached');
+                await this.destroy();
+              }
+            }
+          });
+
+          await this.pupPage.evaluate(async () => {
+            const registrationInfo = await window.require('WAWebSignalStoreApi').waSignalStore.getRegistrationInfo();
+            const noiseKeyPair = await window.require('WAWebUserPrefsInfoStore').waNoiseInfo.get();
+            const staticKeyB64 = window.require('WABase64').encodeB64(noiseKeyPair.staticKeyPair.pubKey);
+            const identityKeyB64 = window.require('WABase64').encodeB64(registrationInfo.identityKeyPair.pubKey);
+            const advSecretKey = await window.require('WAWebUserPrefsMultiDevice').getADVSecretKey();
+            const platform = window.require('WAWebCompanionRegClientUtils').DEVICE_PLATFORM;
+            const getQR = (ref) =>
+              ref + ',' + staticKeyB64 + ',' + identityKeyB64 + ',' + advSecretKey + ',' + platform;
+
+            const conn = window.require('WAWebConnModel').Conn;
+            const onRefChange = (_, ref) => {
+              if (ref == null) return;
+              window.onQRChangedEvent(getQR(ref));
+            };
+
+            if (conn.ref != null) {
+              window.onQRChangedEvent(getQR(conn.ref));
+            } else {
+              try {
+                window.require('WAWebCmd').Cmd.refreshQR();
+              } catch (_) {}
+            }
+            conn.on('change:ref', onRefChange);
+
+            window.require('WAWebSocketModel').Socket.on('change:hasSynced', () => {
+              conn.off('change:ref', onRefChange);
+            });
+          });
+        }
+      }
+
+      await exposeFunctionIfAbsent(this.pupPage, 'onAuthAppStateChangedEvent', async (state) => {
+        if (state == 'UNPAIRED_IDLE' && !(pairWithPhoneNumber && pairWithPhoneNumber.phoneNumber)) {
+          await this.pupPage
+            .evaluate(() => {
+              try {
+                window.require('WAWebCmd').Cmd.refreshQR();
+              } catch (_) {}
+            })
+            .catch(() => {});
+        }
+      });
+
+      await exposeFunctionIfAbsent(this.pupPage, 'onAppStateHasSyncedEvent', async () => {
+        const authEventPayload = await this.authStrategy.getAuthEventPayload();
+        this.emit(Events.AUTHENTICATED, authEventPayload);
+
+        const injected = await this.pupPage.evaluate(async () => {
+          return typeof window.WWebJS !== 'undefined';
+        });
+
+        if (!injected) {
+          if (this.options.webVersionCache.type === 'local' && this.currentIndexHtml) {
+            const { type: webCacheType, ...webCacheOptions } = this.options.webVersionCache;
+            const webCache = WebCacheFactory.createWebCache(webCacheType, webCacheOptions);
+            await webCache.persist(this.currentIndexHtml, version);
+          }
+
+          await this.pupPage.evaluate(LoadUtils);
+
+          await this.pupPage
+            .waitForFunction('typeof window.WWebJS !== "undefined"', { timeout: 30000 })
+            .catch(() => {
+              throw 'ready timeout';
+            });
+
+          this.info = new ClientInfo(
+            this,
+            await this.pupPage.evaluate(() => {
+              return {
+                ...window.require('WAWebConnModel').Conn.serialize(),
+                wid:
+                  window.require('WAWebUserPrefsMeUser').getMaybeMePnUser() ||
+                  window.require('WAWebUserPrefsMeUser').getMaybeMeLidUser()
+              };
+            })
+          );
+
+          this.interface = new InterfaceController(this);
+          await this.attachEventListeners();
+        }
+        this.emit(Events.READY);
+        this.authStrategy.afterAuthReady();
+      });
+
+      let lastPercent = null;
+      await exposeFunctionIfAbsent(this.pupPage, 'onOfflineProgressUpdateEvent', async (percent) => {
+        if (lastPercent !== percent) {
+          lastPercent = percent;
+          this.emit(Events.LOADING_SCREEN, percent, 'WhatsApp');
+        }
+      });
+
+      await exposeFunctionIfAbsent(this.pupPage, 'onLogoutEvent', async () => {
+        this.lastLoggedOut = true;
+        await this.pupPage.waitForNavigation({ waitUntil: 'load', timeout: 5000 }).catch((_) => _);
+      });
+
+      await this.pupPage.evaluate(() => {
+        const Socket = window.require('WAWebSocketModel').Socket;
+        const Cmd = window.require('WAWebCmd').Cmd;
+
+        const listeners = [
+          [
+            Socket,
+            'change:state',
+            (_AppState, state) => {
+              window.onAuthAppStateChangedEvent(state);
+            }
+          ],
+          [
+            Socket,
+            'change:hasSynced',
+            () => {
+              window.onAppStateHasSyncedEvent();
+            }
+          ],
+          [
+            Cmd,
+            'offline_progress_update_from_bridge',
+            () => {
+              window.onOfflineProgressUpdateEvent(
+                window.require('WAWebOfflineHandler').OfflineMessageHandler.getOfflineDeliveryProgress()
+              );
+            }
+          ],
+          [
+            Cmd,
+            'logout',
+            async () => {
+              await window.onLogoutEvent();
+            }
+          ],
+          [
+            Cmd,
+            'logout_from_bridge',
+            async () => {
+              await window.onLogoutEvent();
+            }
+          ]
+        ];
+
+        if (window._wwjsListeners) {
+          for (const [obj, event, handler] of window._wwjsListeners) {
+            obj.off(event, handler);
+          }
+        }
+
+        for (const [obj, event, handler] of listeners) {
+          obj.on(event, handler);
+        }
+        window._wwjsListeners = listeners;
+
+        const storeInjected = typeof window.WWebJS !== 'undefined';
+        if (Socket.hasSynced === true && !storeInjected) {
+          window.onAppStateHasSyncedEvent();
+        }
+      });
+    } catch (err) {
+      if (abort.signal.aborted) return;
+      throw err;
+    } finally {
+      if (this._injectAbort === abort) {
+        this._injectAbort = null;
+      }
     }
-    return await _origInject.apply(this, arguments);
   };
-  console.log('[WA-WORKER] Parches preventivos de WAWebSocketModel aplicados con éxito.');
+  console.log('[WA-WORKER] Parche oficial de inject() y sincronización de WAWebSocketModel aplicado.');
 } catch (err) {
-  console.warn('[WA-WORKER] Error al aplicar parches preventivos:', err.message);
+  console.warn('[WA-WORKER] Error al aplicar parche de inject():', err.message);
 }
 
 const PORT = parseInt(process.env.WA_WORKER_PORT || '3009', 10);
@@ -599,6 +798,21 @@ function killOrphanedChromium() {
   }
 }
 
+async function safeDestroyClient(targetClient, { withLogout = false } = {}) {
+  if (!targetClient) return;
+  const withTimeout = (promise, ms) =>
+    Promise.race([promise, new Promise((resolve) => setTimeout(resolve, ms))]);
+
+  if (withLogout) {
+    try {
+      await withTimeout(targetClient.logout(), 3000);
+    } catch (_) {}
+  }
+  try {
+    await withTimeout(targetClient.destroy(), 3500);
+  } catch (_) {}
+}
+
 function removeSingletonLocks(targetDir = AUTH_DIR) {
   try {
     if (!fs.existsSync(targetDir)) return;
@@ -664,23 +878,25 @@ async function startClient({ asRestart = false } = {}) {
 
   try {
     if (client) {
-      try {
-        await client.destroy();
-      } catch (_) {}
+      const oldClient = client;
       client = null;
+      await safeDestroyClient(oldClient);
     }
+    killOrphanedChromium();
 
     client = new Client({
       authStrategy: new LocalAuth({
         clientId: 'netz-r1-main',
         dataPath: AUTH_DIR
       }),
+      authTimeoutMs: 60000,
       userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
       puppeteer: puppeteerOpts
     });
 
     client.on('qr', async (qr) => {
       if (manualStopped) return;
+      if (!qr || String(qr).startsWith('undefined,') || String(qr).startsWith('null,')) return;
       try {
         const dataUrl = await QRCode.toDataURL(qr, {
           errorCorrectionLevel: 'M',
@@ -699,6 +915,7 @@ async function startClient({ asRestart = false } = {}) {
         state.qrDataUrl = dataUrl;
         state.qrUpdatedAt = nowISO();
         state.lastError = '';
+        console.log('[WA-WORKER] Código QR generado y listo para escanear.');
       } catch (err) {
         state.lastError = 'Error al generar imagen QR: ' + (err.message || String(err));
       }
@@ -751,12 +968,9 @@ async function startClient({ asRestart = false } = {}) {
       if (!manualStopped) {
         state.lastError = reason ? `Sesión desconectada (${reason})` : '';
       }
-      try {
-        if (client) {
-          await client.destroy();
-        }
-      } catch (_) {}
+      const oldClient = client;
       client = null;
+      await safeDestroyClient(oldClient);
     });
 
     client.initialize().catch((err) => {
@@ -785,12 +999,6 @@ async function stopClient() {
   isStarting = false;
   isRestartingMode = false;
   state.restartStartedAt = null;
-  if (client) {
-    try {
-      await client.destroy();
-    } catch (_) {}
-    client = null;
-  }
   state.status = 'STOPPED';
   state.connected = false;
   state.qrRaw = '';
@@ -799,6 +1007,12 @@ async function stopClient() {
   if (state.account) {
     state.account.lastActivityAt = nowISO();
   }
+  if (client) {
+    const oldClient = client;
+    client = null;
+    await safeDestroyClient(oldClient);
+  }
+  killOrphanedChromium();
 }
 
 async function restartClient() {
@@ -813,10 +1027,9 @@ async function restartClient() {
   state.lastError = '';
 
   if (client) {
-    try {
-      await client.destroy();
-    } catch (_) {}
+    const oldClient = client;
     client = null;
+    await safeDestroyClient(oldClient);
   }
   await startClient({ asRestart: true });
 }
@@ -826,26 +1039,22 @@ async function deleteSessionAndRestart() {
   isStarting = false;
   isRestartingMode = false;
   state.restartStartedAt = null;
-  if (client) {
-    try {
-      await client.logout();
-    } catch (_) {}
-    try {
-      await client.destroy();
-    } catch (_) {}
-    client = null;
-  }
-
-  // Matar procesos Chromium colgados y liberar descriptores
-  killOrphanedChromium();
-  await new Promise((r) => setTimeout(r, 1000));
-
-  state.status = 'DISCONNECTED';
+  state.status = 'INITIALIZING';
   state.connected = false;
   state.qrRaw = '';
   state.qrDataUrl = '';
   state.account = null;
   state.lastError = '';
+
+  if (client) {
+    const oldClient = client;
+    client = null;
+    await safeDestroyClient(oldClient, { withLogout: true });
+  }
+
+  // Matar procesos Chromium colgados y liberar descriptores
+  killOrphanedChromium();
+  await new Promise((r) => setTimeout(r, 800));
 
   try {
     if (fs.existsSync(AUTH_DIR)) {
@@ -1076,33 +1285,14 @@ function readJsonBody(req) {
   });
 }
 
+let isBackgroundChecking = false;
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://127.0.0.1:${PORT}`);
   const pathname = url.pathname;
 
   try {
     if (req.method === 'GET' && pathname === '/status') {
-      if (client && client.pupPage && state.status !== 'CONNECTED' && state.status !== 'STOPPED' && state.status !== 'RESTARTING') {
-        try {
-          const isRegistered = await client.pupPage.evaluate(() => {
-            try {
-              const conn = window.require('WAWebConnModel')?.Conn;
-              return Boolean(conn && conn.isRegistered === true && conn.wid);
-            } catch (_) {
-              return false;
-            }
-          });
-          if (isRegistered && client.info && client.info.wid) {
-            state.status = 'CONNECTED';
-            state.connected = true;
-            state.qrRaw = '';
-            state.qrDataUrl = '';
-            await ensureWWebJSPatched();
-            await populateAccountInfo();
-          }
-        } catch (_) {}
-      }
-
       // Si hay un código QR emitido y el cliente aún no tiene credenciales autenticadas, el estado real es QR_READY
       if (state.qrRaw && (!client || !client.info || !client.info.wid)) {
         if (state.status !== 'STOPPED' && state.status !== 'RESTARTING') {
@@ -1111,14 +1301,52 @@ const server = http.createServer(async (req, res) => {
         }
       }
 
-      if (state.status === 'CONNECTED' && (!state.account || !state.account.phone || !state.account.profilePicUrl || !state.account.wwebVersion)) {
-        await populateAccountInfo();
+      // Ejecutar chequeos de sincronización en segundo plano sin bloquear jamás la respuesta HTTP de /status
+      if (!isBackgroundChecking) {
+        if (client && client.pupPage && (state.status === 'QR_READY' || state.status === 'AUTHENTICATED')) {
+          isBackgroundChecking = true;
+          Promise.race([
+            client.pupPage.evaluate(() => {
+              try {
+                const conn = window.require('WAWebConnModel')?.Conn;
+                return Boolean(conn && conn.isRegistered === true && conn.wid);
+              } catch (_) {
+                return false;
+              }
+            }),
+            new Promise((r) => setTimeout(() => r(false), 1200))
+          ])
+            .then(async (isRegistered) => {
+              if (isRegistered && client && client.info && client.info.wid) {
+                state.status = 'CONNECTED';
+                state.connected = true;
+                state.qrRaw = '';
+                state.qrDataUrl = '';
+                await ensureWWebJSPatched();
+                await populateAccountInfo();
+              }
+            })
+            .catch(() => {})
+            .finally(() => {
+              isBackgroundChecking = false;
+            });
+        } else if (state.status === 'CONNECTED' && (!state.account || !state.account.phone || !state.account.profilePicUrl || !state.account.wwebVersion)) {
+          isBackgroundChecking = true;
+          populateAccountInfo()
+            .catch(() => {})
+            .finally(() => {
+              isBackgroundChecking = false;
+            });
+        }
       }
+
       return sendJSON(res, 200, state);
     }
 
     if (req.method === 'POST' && pathname === '/start') {
-      await startClient({ asRestart: false });
+      startClient({ asRestart: false }).catch((err) => {
+        console.error('[WA-WORKER START ERROR]', err);
+      });
       return sendJSON(res, 200, state);
     }
 
@@ -1130,12 +1358,16 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === 'POST' && pathname === '/stop') {
-      await stopClient();
+      stopClient().catch((err) => {
+        console.error('[WA-WORKER STOP ERROR]', err);
+      });
       return sendJSON(res, 200, state);
     }
 
     if (req.method === 'POST' && pathname === '/delete-session') {
-      await deleteSessionAndRestart();
+      deleteSessionAndRestart().catch((err) => {
+        console.error('[WA-WORKER DELETE-SESSION ERROR]', err);
+      });
       return sendJSON(res, 200, state);
     }
 
