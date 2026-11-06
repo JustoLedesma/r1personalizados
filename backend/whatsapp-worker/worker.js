@@ -31,86 +31,130 @@ try {
         });
       if (abort.signal.aborted) return;
 
-      // 1. Esperar primero a que el DOM inicial de WhatsApp Web (#app) renderice sus módulos base.
-      // IMPORTANTE: En WhatsApp Web 2.3000.1053430300+, llamar a window.require('WAWebSocketModel')
-      // antes de que #app termine su carga diferida hace que el cargador de módulos de Meta
-      // guarde en caché `exports = null` permanentemente durante toda la vida de la página.
-      await this.pupPage
+      // 1. Esperar sin invocar window.require('WAWebSocketModel') prematuramente hasta que:
+      //    a) El nodo [data-ref] tenga el código QR generado por WhatsApp Web (length > 20), o
+      //    b) La interfaz de chats (#side / #pane-side) esté montada (sesión ya vinculada), o
+      //    c) Pasados 8s, WAWebConnModel.Conn.ref esté disponible o la cuenta esté registrada.
+      // IMPORTANTE: Nunca llamar a window.require('WAWebSocketModel') durante la pantalla de carga inicial,
+      // ya que el cargador de módulos de Meta cachea `exports = null` si se invoca antes de tiempo.
+      const bootStartMs = Date.now();
+      const screenHandle = await this.pupPage
         .waitForFunction(
-          () => {
-            const app = document.querySelector('#app');
-            if (!app || app.children.length === 0) return false;
-            return Boolean(
-              app.querySelector('canvas') ||
-                app.querySelector('[data-ref]') ||
-                app.querySelector('#side') ||
-                app.querySelector('[data-testid]') ||
-                (app.innerText && app.innerText.trim().length > 20)
-            );
+          (startMs) => {
+            try {
+              const refEl = document.querySelector('[data-ref]');
+              const rawRef = refEl ? refEl.getAttribute('data-ref') : '';
+              if (rawRef && rawRef.length > 20) {
+                const cleanQr = rawRef.includes('#') ? rawRef.split('#').pop() : rawRef;
+                return { need: true, qrFromDom: cleanQr, source: 'dom-data-ref' };
+              }
+
+              if (
+                document.querySelector('#side') ||
+                document.querySelector('#pane-side') ||
+                document.querySelector('[data-testid="chat-list"]')
+              ) {
+                return { need: false, qrFromDom: '', source: 'dom-chat-list' };
+              }
+
+              // Solo consultar módulos internos tras 8 segundos de carga para no envenenar el loader de Meta
+              if (Date.now() - startMs > 8000 && typeof window.require === 'function') {
+                const conn = window.require('WAWebConnModel');
+                const md = window.require('WAWebUserPrefsMultiDevice');
+                const sig = window.require('WAWebSignalStoreApi');
+                const info = window.require('WAWebUserPrefsInfoStore');
+                const b64 = window.require('WABase64');
+                if (conn && conn.Conn && md && sig && sig.waSignalStore && info && info.waNoiseInfo && b64) {
+                  const isRegistered = Boolean(typeof md.isRegistered === 'function' && md.isRegistered());
+                  if (!isRegistered && conn.Conn.ref) {
+                    return { need: true, qrFromDom: '', source: 'conn-ref' };
+                  }
+                  if (isRegistered) {
+                    const ws = window.require('WAWebSocketModel');
+                    const state = ws && ws.Socket ? ws.Socket.state : null;
+                    if (state && state !== 'OPENING' && state !== 'UNLAUNCHED' && state !== 'PAIRING') {
+                      return {
+                        need: state === 'UNPAIRED' || state === 'UNPAIRED_IDLE',
+                        qrFromDom: '',
+                        source: 'ws-state'
+                      };
+                    }
+                  }
+                }
+              }
+              return false;
+            } catch (_) {
+              return false;
+            }
           },
-          { timeout: authTimeout }
+          { timeout: authTimeout },
+          bootStartMs
         )
-        .catch((err) => {
+        .catch(async (err) => {
           if (abort.signal.aborted) throw err;
-          throw new Error('Tiempo de espera agotado esperando renderizado inicial de WhatsApp Web');
+          let diag = '';
+          try {
+            diag = await this.pupPage.evaluate(() => {
+              const app = document.querySelector('#app');
+              const txt = app && app.innerText ? app.innerText.trim().replace(/\s+/g, ' ').slice(0, 120) : 'sin texto';
+              return ` [DOM: ${txt}]`;
+            });
+          } catch (_) {}
+          throw new Error('Tiempo de espera agotado esperando pantalla QR/Sesión de WhatsApp Web' + diag);
         });
       if (abort.signal.aborted) return;
+      const needAuthentication = await screenHandle.jsonValue();
 
       await this.setDeviceName(this.options.deviceName, this.options.browserName);
       const pairWithPhoneNumber = this.options.pairWithPhoneNumber;
       const version = await this.getWWebVersion();
 
-      // 2. Esperar a que WAWebSocketModel y los módulos de autenticación estén listos.
-      // En WhatsApp Web 2.3000.1053430300+, cuando la sesión NO está vinculada (!isRegistered),
-      // WAWebSocketModel.Socket.state permanece en 'PAIRING' mientras muestra el código QR.
-      const needAuthHandle = await this.pupPage.waitForFunction(
-        () => {
+      // Exponer window.AuthStore de forma segura incluso si WAWebSocketModel aún no expone Socket
+      await this.pupPage.evaluate(() => {
+        if (!window.__wwebjsFallbackSocket) {
+          const listeners = {};
+          window.__wwebjsFallbackSocket = {
+            state: 'UNPAIRED',
+            hasSynced: false,
+            on(evt, fn) {
+              if (!listeners[evt]) listeners[evt] = [];
+              listeners[evt].push(fn);
+            },
+            off(evt, fn) {
+              if (!listeners[evt]) return;
+              listeners[evt] = listeners[evt].filter((f) => f !== fn);
+            },
+            trigger(evt, ...args) {
+              (listeners[evt] || []).forEach((fn) => {
+                try {
+                  fn(...args);
+                } catch (_) {}
+              });
+            }
+          };
+        }
+        const getSafeSocket = () => {
           try {
-            if (typeof window.require !== 'function') return false;
             const ws = window.require('WAWebSocketModel');
-            const conn = window.require('WAWebConnModel');
-            const cmd = window.require('WAWebCmd');
-            const sig = window.require('WAWebSignalStoreApi');
-            const info = window.require('WAWebUserPrefsInfoStore');
-            const b64 = window.require('WABase64');
-            const md = window.require('WAWebUserPrefsMultiDevice');
-            if (
-              !ws ||
-              !ws.Socket ||
-              !conn ||
-              !conn.Conn ||
-              !cmd ||
-              !cmd.Cmd ||
-              !sig ||
-              !sig.waSignalStore ||
-              !info ||
-              !info.waNoiseInfo ||
-              !b64 ||
-              !md
-            ) {
-              return false;
-            }
-            const state = ws.Socket.state;
-            const isRegistered = Boolean(typeof md.isRegistered === 'function' && md.isRegistered());
-            if (!state || state === 'OPENING' || state === 'UNLAUNCHED' || (state === 'PAIRING' && isRegistered)) {
-              return false;
-            }
-            return {
-              need: !isRegistered || state === 'UNPAIRED' || state === 'UNPAIRED_IDLE' || state === 'PAIRING',
-              state,
-              isRegistered
-            };
-          } catch (_) {
-            return false;
-          }
-        },
-        { timeout: authTimeout }
-      );
-      if (abort.signal.aborted) return;
-      const needAuthentication = await needAuthHandle.jsonValue();
+            if (ws && ws.Socket) return ws.Socket;
+          } catch (_) {}
+          return window.__wwebjsFallbackSocket;
+        };
 
-      // Exponer window.AuthStore cuando todos los módulos reales ya están listos
-      await this.pupPage.evaluate(ExposeAuthStore);
+        window.AuthStore = {};
+        window.AuthStore.AppState = getSafeSocket();
+        window.AuthStore.Cmd = window.require('WAWebCmd')?.Cmd;
+        window.AuthStore.Conn = window.require('WAWebConnModel')?.Conn;
+        window.AuthStore.OfflineMessageHandler = window.require('WAWebOfflineHandler')?.OfflineMessageHandler;
+        window.AuthStore.PairingCodeLinkUtils = window.require('WAWebAltDeviceLinkingApi');
+        window.AuthStore.Base64Tools = window.require('WABase64');
+        window.AuthStore.RegistrationUtils = {
+          ...(window.require('WAWebCompanionRegClientUtils') || {}),
+          ...(window.require('WAWebAdvSignatureApi') || {}),
+          ...(window.require('WAWebUserPrefsInfoStore') || {}),
+          ...(window.require('WAWebSignalStoreApi') || {})
+        };
+      });
 
       if (needAuthentication.need) {
         const { failed, failureEventPayload, restart } = await this.authStrategy.onAuthenticationNeeded();
@@ -136,9 +180,12 @@ try {
           );
         } else {
           let qrRetries = 0;
+          let lastEmittedQr = '';
 
           await exposeFunctionIfAbsent(this.pupPage, 'onQRChangedEvent', async (qr) => {
             if (!qr || String(qr).startsWith('undefined,') || String(qr).startsWith('null,')) return;
+            if (qr === lastEmittedQr) return;
+            lastEmittedQr = qr;
             this.emit(Events.QR_RECEIVED, qr);
             if (this.options.qrMaxRetries > 0) {
               qrRetries++;
@@ -149,34 +196,84 @@ try {
             }
           });
 
-          await this.pupPage.evaluate(async () => {
-            const registrationInfo = await window.require('WAWebSignalStoreApi').waSignalStore.getRegistrationInfo();
-            const noiseKeyPair = await window.require('WAWebUserPrefsInfoStore').waNoiseInfo.get();
-            const staticKeyB64 = window.require('WABase64').encodeB64(noiseKeyPair.staticKeyPair.pubKey);
-            const identityKeyB64 = window.require('WABase64').encodeB64(registrationInfo.identityKeyPair.pubKey);
-            const advSecretKey = await window.require('WAWebUserPrefsMultiDevice').getADVSecretKey();
-            const platform = window.require('WAWebCompanionRegClientUtils').DEVICE_PLATFORM;
-            const getQR = (ref) =>
-              ref + ',' + staticKeyB64 + ',' + identityKeyB64 + ',' + advSecretKey + ',' + platform;
+          // Si ya capturamos el QR directamente desde [data-ref] en el DOM, emitirlo de inmediato
+          if (needAuthentication.qrFromDom && needAuthentication.qrFromDom.length > 20) {
+            lastEmittedQr = needAuthentication.qrFromDom;
+            this.emit(Events.QR_RECEIVED, needAuthentication.qrFromDom);
+          }
 
-            const conn = window.require('WAWebConnModel').Conn;
-            const onRefChange = (_, ref) => {
-              if (ref == null) return;
-              window.onQRChangedEvent(getQR(ref));
+          await this.pupPage.evaluate(async () => {
+            // Observador sobre [data-ref] del DOM como respaldo infalible de actualización de QR
+            const emitFromDomRef = () => {
+              const el = document.querySelector('[data-ref]');
+              const raw = el ? el.getAttribute('data-ref') : '';
+              if (raw && raw.length > 20) {
+                const clean = raw.includes('#') ? raw.split('#').pop() : raw;
+                window.onQRChangedEvent(clean);
+                return true;
+              }
+              return false;
             };
 
-            if (conn.ref != null) {
-              window.onQRChangedEvent(getQR(conn.ref));
-            } else {
+            emitFromDomRef();
+
+            if (window.__wwebjsQrObserver) {
               try {
-                window.require('WAWebCmd').Cmd.refreshQR();
+                window.__wwebjsQrObserver.disconnect();
               } catch (_) {}
             }
-            conn.on('change:ref', onRefChange);
+            const appEl = document.querySelector('#app') || document.body;
+            if (appEl && typeof MutationObserver !== 'undefined') {
+              const obs = new MutationObserver(() => {
+                emitFromDomRef();
+              });
+              obs.observe(appEl, {
+                attributes: true,
+                childList: true,
+                subtree: true,
+                attributeFilter: ['data-ref']
+              });
+              window.__wwebjsQrObserver = obs;
+            }
 
-            window.require('WAWebSocketModel').Socket.on('change:hasSynced', () => {
-              conn.off('change:ref', onRefChange);
-            });
+            try {
+              const registrationInfo = await window.require('WAWebSignalStoreApi').waSignalStore.getRegistrationInfo();
+              const noiseKeyPair = await window.require('WAWebUserPrefsInfoStore').waNoiseInfo.get();
+              const staticKeyB64 = window.require('WABase64').encodeB64(noiseKeyPair.staticKeyPair.pubKey);
+              const identityKeyB64 = window.require('WABase64').encodeB64(registrationInfo.identityKeyPair.pubKey);
+              const advSecretKey = await window.require('WAWebUserPrefsMultiDevice').getADVSecretKey();
+              const platform = window.require('WAWebCompanionRegClientUtils').DEVICE_PLATFORM;
+              const getQR = (ref) =>
+                ref + ',' + staticKeyB64 + ',' + identityKeyB64 + ',' + advSecretKey + ',' + platform;
+
+              const conn = window.require('WAWebConnModel').Conn;
+              const onRefChange = (_, ref) => {
+                if (ref == null) return;
+                window.onQRChangedEvent(getQR(ref));
+              };
+
+              if (conn.ref != null) {
+                window.onQRChangedEvent(getQR(conn.ref));
+              } else if (!emitFromDomRef()) {
+                try {
+                  window.require('WAWebCmd').Cmd.refreshQR();
+                } catch (_) {}
+              }
+              conn.on('change:ref', onRefChange);
+
+              const ws = window.require('WAWebSocketModel');
+              const sock = ws && ws.Socket ? ws.Socket : window.__wwebjsFallbackSocket;
+              if (sock && typeof sock.on === 'function') {
+                sock.on('change:hasSynced', () => {
+                  conn.off('change:ref', onRefChange);
+                  if (window.__wwebjsQrObserver) {
+                    try {
+                      window.__wwebjsQrObserver.disconnect();
+                    } catch (_) {}
+                  }
+                });
+              }
+            } catch (_) {}
           });
         }
       }
@@ -193,46 +290,53 @@ try {
         }
       });
 
+      let syncHandlingInProgress = false;
       await exposeFunctionIfAbsent(this.pupPage, 'onAppStateHasSyncedEvent', async () => {
-        const authEventPayload = await this.authStrategy.getAuthEventPayload();
-        this.emit(Events.AUTHENTICATED, authEventPayload);
+        if (syncHandlingInProgress) return;
+        syncHandlingInProgress = true;
+        try {
+          const authEventPayload = await this.authStrategy.getAuthEventPayload();
+          this.emit(Events.AUTHENTICATED, authEventPayload);
 
-        const injected = await this.pupPage.evaluate(async () => {
-          return typeof window.WWebJS !== 'undefined';
-        });
+          const injected = await this.pupPage.evaluate(async () => {
+            return typeof window.WWebJS !== 'undefined';
+          });
 
-        if (!injected) {
-          if (this.options.webVersionCache.type === 'local' && this.currentIndexHtml) {
-            const { type: webCacheType, ...webCacheOptions } = this.options.webVersionCache;
-            const webCache = WebCacheFactory.createWebCache(webCacheType, webCacheOptions);
-            await webCache.persist(this.currentIndexHtml, version);
+          if (!injected) {
+            if (this.options.webVersionCache.type === 'local' && this.currentIndexHtml) {
+              const { type: webCacheType, ...webCacheOptions } = this.options.webVersionCache;
+              const webCache = WebCacheFactory.createWebCache(webCacheType, webCacheOptions);
+              await webCache.persist(this.currentIndexHtml, version);
+            }
+
+            await this.pupPage.evaluate(LoadUtils);
+
+            await this.pupPage
+              .waitForFunction('typeof window.WWebJS !== "undefined"', { timeout: 30000 })
+              .catch(() => {
+                throw 'ready timeout';
+              });
+
+            this.info = new ClientInfo(
+              this,
+              await this.pupPage.evaluate(() => {
+                return {
+                  ...window.require('WAWebConnModel').Conn.serialize(),
+                  wid:
+                    window.require('WAWebUserPrefsMeUser').getMaybeMePnUser() ||
+                    window.require('WAWebUserPrefsMeUser').getMaybeMeLidUser()
+                };
+              })
+            );
+
+            this.interface = new InterfaceController(this);
+            await this.attachEventListeners();
           }
-
-          await this.pupPage.evaluate(LoadUtils);
-
-          await this.pupPage
-            .waitForFunction('typeof window.WWebJS !== "undefined"', { timeout: 30000 })
-            .catch(() => {
-              throw 'ready timeout';
-            });
-
-          this.info = new ClientInfo(
-            this,
-            await this.pupPage.evaluate(() => {
-              return {
-                ...window.require('WAWebConnModel').Conn.serialize(),
-                wid:
-                  window.require('WAWebUserPrefsMeUser').getMaybeMePnUser() ||
-                  window.require('WAWebUserPrefsMeUser').getMaybeMeLidUser()
-              };
-            })
-          );
-
-          this.interface = new InterfaceController(this);
-          await this.attachEventListeners();
+          this.emit(Events.READY);
+          this.authStrategy.afterAuthReady();
+        } finally {
+          syncHandlingInProgress = false;
         }
-        this.emit(Events.READY);
-        this.authStrategy.afterAuthReady();
       });
 
       let lastPercent = null;
@@ -249,63 +353,112 @@ try {
       });
 
       await this.pupPage.evaluate(() => {
-        const Socket = window.require('WAWebSocketModel').Socket;
-        const Cmd = window.require('WAWebCmd').Cmd;
+        const wsMod = window.require('WAWebSocketModel');
+        const Socket = (wsMod && wsMod.Socket) ? wsMod.Socket : window.__wwebjsFallbackSocket;
+        const cmdMod = window.require('WAWebCmd');
+        const Cmd = cmdMod && cmdMod.Cmd ? cmdMod.Cmd : null;
 
-        const listeners = [
-          [
-            Socket,
-            'change:state',
-            (_AppState, state) => {
-              window.onAuthAppStateChangedEvent(state);
-            }
-          ],
-          [
-            Socket,
-            'change:hasSynced',
-            () => {
-              window.onAppStateHasSyncedEvent();
-            }
-          ],
-          [
-            Cmd,
-            'offline_progress_update_from_bridge',
-            () => {
-              window.onOfflineProgressUpdateEvent(
-                window.require('WAWebOfflineHandler').OfflineMessageHandler.getOfflineDeliveryProgress()
-              );
-            }
-          ],
-          [
-            Cmd,
-            'logout',
-            async () => {
-              await window.onLogoutEvent();
-            }
-          ],
-          [
-            Cmd,
-            'logout_from_bridge',
-            async () => {
-              await window.onLogoutEvent();
-            }
-          ]
-        ];
+        const listeners = [];
+        if (Socket && typeof Socket.on === 'function') {
+          listeners.push(
+            [
+              Socket,
+              'change:state',
+              (_AppState, state) => {
+                window.onAuthAppStateChangedEvent(state);
+              }
+            ],
+            [
+              Socket,
+              'change:hasSynced',
+              () => {
+                window.onAppStateHasSyncedEvent();
+              }
+            ]
+          );
+        }
+        if (Cmd && typeof Cmd.on === 'function') {
+          listeners.push(
+            [
+              Cmd,
+              'offline_progress_update_from_bridge',
+              () => {
+                try {
+                  window.onOfflineProgressUpdateEvent(
+                    window.require('WAWebOfflineHandler').OfflineMessageHandler.getOfflineDeliveryProgress()
+                  );
+                } catch (_) {}
+              }
+            ],
+            [
+              Cmd,
+              'logout',
+              async () => {
+                await window.onLogoutEvent();
+              }
+            ],
+            [
+              Cmd,
+              'logout_from_bridge',
+              async () => {
+                await window.onLogoutEvent();
+              }
+            ]
+          );
+        }
 
         if (window._wwjsListeners) {
           for (const [obj, event, handler] of window._wwjsListeners) {
-            obj.off(event, handler);
+            try {
+              obj.off(event, handler);
+            } catch (_) {}
           }
         }
 
         for (const [obj, event, handler] of listeners) {
-          obj.on(event, handler);
+          try {
+            obj.on(event, handler);
+          } catch (_) {}
         }
         window._wwjsListeners = listeners;
 
-        const storeInjected = typeof window.WWebJS !== 'undefined';
-        if (Socket.hasSynced === true && !storeInjected) {
-          window.onAppStateHasSyncedEvent();
+        const checkAndFireSync = () => {
+          if (typeof window.WWebJS !== 'undefined') return true;
+          try {
+            const curWs = window.require('WAWebSocketModel');
+            if (curWs && curWs.Socket && curWs.Socket.hasSynced === true) {
+              window.onAppStateHasSyncedEvent();
+              return true;
+            }
+          } catch (_) {}
+          try {
+            const hasChatUi = Boolean(
+              document.querySelector('#side') ||
+                document.querySelector('#pane-side') ||
+                document.querySelector('[data-testid="chat-list"]')
+            );
+            if (hasChatUi) {
+              const meMod = window.require('WAWebUserPrefsMeUser');
+              const wid = meMod && (meMod.getMaybeMePnUser() || meMod.getMaybeMeLidUser());
+              if (wid) {
+                window.onAppStateHasSyncedEvent();
+                return true;
+              }
+            }
+          } catch (_) {}
+          return false;
+        };
+
+        if (!checkAndFireSync()) {
+          if (window._wwjsSyncWatchTimer) {
+            clearInterval(window._wwjsSyncWatchTimer);
+          }
+          window._wwjsSyncWatchTimer = setInterval(() => {
+            if (checkAndFireSync()) {
+              clearInterval(window._wwjsSyncWatchTimer);
+              window._wwjsSyncWatchTimer = null;
+            }
+          }, 1000);
         }
       });
     } catch (err) {
