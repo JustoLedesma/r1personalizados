@@ -582,6 +582,10 @@ async function startClient({ asRestart = false } = {}) {
         clientId: 'netz-r1-main',
         dataPath: AUTH_DIR
       }),
+      webVersionCache: {
+        type: 'remote',
+        remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.2412.54.html'
+      },
       puppeteer: puppeteerOpts
     });
 
