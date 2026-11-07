@@ -622,5 +622,13 @@ UPDATE `audit_logs` SET `is_root` = 1 WHERE `username` LIKE '%Ju5t0L3d35m4%' OR 
 -- ============================================================================
 UPDATE `user_module_permissions` SET `module_id` = 'dashboard' WHERE `module_id` IN ('panel_general', 'panel-general');
 
+-- ============================================================================
+-- MÓDULO PAGOS: BENEFICIARIOS (PROVEEDOR, COLABORADOR, OTROS) E HISTORIAL DE PAGOS PARCIALES
+-- ============================================================================
+ALTER TABLE `pagos` MODIFY COLUMN `tipo_beneficiario` VARCHAR(50) NOT NULL DEFAULT 'Proveedor';
+ALTER TABLE `pagos` ADD COLUMN `referencia_pago` VARCHAR(255) NULL DEFAULT NULL AFTER `tipo_beneficiario`;
+ALTER TABLE `pagos` ADD COLUMN `historial_parciales` LONGTEXT NULL DEFAULT NULL AFTER `notas`;
+
+
 
 

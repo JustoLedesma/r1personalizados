@@ -49,6 +49,24 @@ function getISOWeekNumber(date) {
   return Math.ceil(((d - yearStart) / 86400000 + 1) / 7);
 }
 
+function getISOWeekAndYearFromStr(isoDateStr) {
+  const clean = String(isoDateStr || '').split('T')[0];
+  const parts = clean.split('-');
+  let d;
+  if (parts.length === 3) {
+    d = new Date(Date.UTC(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2])));
+  } else {
+    const now = new Date();
+    d = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
+  }
+  const dayNum = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+  const isoYear = d.getUTCFullYear();
+  const yearStart = new Date(Date.UTC(isoYear, 0, 1));
+  const isoWeek = Math.ceil(((d - yearStart) / 86400000 + 1) / 7);
+  return { week: isoWeek, year: isoYear };
+}
+
 // Switch iOS estandarizado según AGENTS.md
 function createIOSToggle({ label = '', checked = false, onChange = null, activeColor = 'brand' }) {
   const wrap = document.createElement('label');
@@ -196,6 +214,7 @@ export function renderPagosModule(container) {
     loading: false,
     catalogoProveedores: [],
     catalogoClientes: [],
+    catalogoColaboradores: [],
     catalogoProductos: [],
     catalogoPedidos: [],
   };
@@ -224,7 +243,7 @@ export function renderPagosModule(container) {
           <span>Gestión de Pagos</span>
         </h1>
         <p class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-          Control de pagos a proveedores, pagos a clientes y vinculación de compras por pedido
+          Control de pagos a proveedores, colaboradores, otros gastos y vinculación de compras por pedido
         </p>
       </div>
       <div class="flex items-center gap-2 mt-2 sm:mt-0 sm:ml-2">
@@ -353,7 +372,8 @@ export function renderPagosModule(container) {
           <select id="filter-beneficiario" class="bg-transparent text-xs font-bold text-slate-700 dark:text-slate-200 focus:outline-none cursor-pointer">
             <option value="todos" ${state.headerBeneficiario === 'todos' ? 'selected' : ''}>Todos</option>
             <option value="Proveedor" ${state.headerBeneficiario === 'Proveedor' ? 'selected' : ''}>Proveedores</option>
-            <option value="Cliente" ${state.headerBeneficiario === 'Cliente' ? 'selected' : ''}>Clientes</option>
+            <option value="Colaborador" ${state.headerBeneficiario === 'Colaborador' ? 'selected' : ''}>Colaboradores</option>
+            <option value="Otros" ${state.headerBeneficiario === 'Otros' ? 'selected' : ''}>Otros</option>
           </select>
         </div>
 
@@ -571,30 +591,60 @@ export function renderPagosModule(container) {
         key: 'fechaPago',
         label: 'Semana',
         render: (row) => {
+          const wrap = document.createElement('div');
+          wrap.className = 'flex flex-col items-start gap-1';
           const badge = document.createElement('span');
           badge.className =
             'inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-mono';
           badge.textContent = `S${row.semanaIso || weekNum}`;
-          return badge;
+          wrap.appendChild(badge);
+
+          if (row.estadoPago === 'Pago Parcial' && Array.isArray(row.historialParciales) && row.historialParciales.length > 0) {
+            const lastParcial = row.historialParciales[row.historialParciales.length - 1];
+            const weeksSet = [...new Set(row.historialParciales.map((hp) => `S${hp.semanaIso || row.semanaIso}`))];
+            const sub = document.createElement('span');
+            sub.className = 'inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-purple-100 text-brand dark:bg-brand/20 dark:text-brand font-mono';
+            sub.innerHTML = `<i class="fa-solid fa-calendar-check text-[8px]"></i><span>${weeksSet.join(' → ')} · ${formatDateDisplay(lastParcial.fechaPago || row.fechaPago)}</span>`;
+            wrap.appendChild(sub);
+          }
+          return wrap;
         },
       },
       {
         key: 'beneficiario',
         label: 'Beneficiario',
         render: (row) => {
-          const isProv = row.tipoBeneficiario === 'Proveedor';
-          const nom = isProv ? row.proveedorNombre : (row.clienteNombre || '—');
-          const doc = isProv ? row.proveedorRuc : (row.clienteDocumento || '');
+          const tipo = row.tipoBeneficiario || 'Proveedor';
+          const isProv = tipo === 'Proveedor';
+          const isColab = tipo === 'Colaborador';
+          const isOtros = tipo === 'Otros';
+
+          const nom = isOtros
+            ? (row.proveedorNombre || row.referenciaPago || 'Otros')
+            : isProv || isColab
+            ? (row.proveedorNombre || row.clienteNombre || '—')
+            : (row.clienteNombre || row.proveedorNombre || '—');
+          const doc = isProv || isColab || isOtros ? (row.proveedorRuc || '') : (row.clienteDocumento || '');
           const isTemporal = isProv ? row.esProveedorTemporal : false;
+
+          let badgeStyle = 'bg-purple-100 text-brand dark:bg-brand/20 dark:text-brand';
+          if (isColab) {
+            badgeStyle = 'bg-sky-100 text-sky-800 dark:bg-sky-950/60 dark:text-sky-300';
+          } else if (isOtros) {
+            badgeStyle = 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300';
+          } else if (!isProv) {
+            badgeStyle = 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300';
+          }
 
           const wrap = document.createElement('div');
           wrap.className = 'space-y-0.5';
           wrap.innerHTML = `
-            <div class="flex items-center gap-1.5">
-              <span class="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase ${isProv ? 'bg-purple-100 text-brand dark:bg-brand/20 dark:text-brand' : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300'}">${isProv ? 'Proveedor' : 'Cliente'}</span>
+            <div class="flex items-center gap-1.5 flex-wrap">
+              <span class="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase ${badgeStyle}">${escapeHtml(tipo)}</span>
               <span class="font-bold text-slate-800 dark:text-slate-100 text-xs">${escapeHtml(nom)}</span>
             </div>
             <div class="text-[10px] text-slate-400">
+              ${isOtros && row.referenciaPago && row.referenciaPago !== nom ? `<div class="text-brand font-semibold">Ref: ${escapeHtml(row.referenciaPago)}</div>` : ''}
               ${doc ? `<span>Doc: ${escapeHtml(doc)}</span>` : ''}
               ${isTemporal ? '<span class="text-amber-500 ml-1 font-semibold">· Temporal</span>' : ''}
             </div>
@@ -835,17 +885,20 @@ export function renderPagosModule(container) {
   // Pre-carga de catálogos para modales
   async function loadCatalogos() {
     try {
-      const [provs, clis, prods, peds] = await Promise.all([
+      const [provs, clis, prods, peds, usrs] = await Promise.all([
         apiFetch('/api/proveedores').catch(() => null),
         apiFetch('/api/clientes').catch(() => null),
         apiFetch('/api/productos').catch(() => null),
         apiFetch('/api/pedidos').catch(() => null),
+        apiFetch('/api/users').catch(() => null),
       ]);
 
       if (provs && Array.isArray(provs.data)) state.catalogoProveedores = provs.data;
       if (clis && Array.isArray(clis.data)) state.catalogoClientes = clis.data;
       if (prods && Array.isArray(prods.data)) state.catalogoProductos = prods.data;
       if (peds && Array.isArray(peds.data)) state.catalogoPedidos = peds.data;
+      if (usrs && Array.isArray(usrs.data)) state.catalogoColaboradores = usrs.data;
+      else if (Array.isArray(usrs)) state.catalogoColaboradores = usrs;
     } catch (_) {}
   }
 
@@ -859,7 +912,26 @@ export function renderPagosModule(container) {
       if (fresh) p = fresh;
     } catch (_) {}
 
-    const isProv = p.tipoBeneficiario === 'Proveedor';
+    const tipo = p.tipoBeneficiario || 'Proveedor';
+    const isProv = tipo === 'Proveedor';
+    const isColab = tipo === 'Colaborador';
+    const isOtros = tipo === 'Otros';
+
+    const benIcon = isProv
+      ? 'fa-solid fa-truck-field'
+      : isColab
+      ? 'fa-solid fa-user-tie'
+      : isOtros
+      ? 'fa-solid fa-tags'
+      : 'fa-solid fa-user';
+    const benNombre = isProv || isColab || isOtros
+      ? (p.proveedorNombre || p.referenciaPago || p.clienteNombre || '—')
+      : (p.clienteNombre || p.proveedorNombre || '—');
+    const benDoc = isProv || isColab || isOtros
+      ? (p.proveedorRuc || 'No registrado')
+      : (p.clienteDocumento || 'No registrado');
+
+    const historialParciales = Array.isArray(p.historialParciales) ? p.historialParciales : [];
 
     const content = document.createElement('div');
     content.className = 'space-y-4 text-xs';
@@ -870,6 +942,7 @@ export function renderPagosModule(container) {
         <div>
           <span class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Comprobante de Pago</span>
           <h3 class="text-base font-black text-brand font-mono">${escapeHtml(p.numeroPago)}</h3>
+          <span class="text-[11px] text-slate-500">Fecha de Pago: <strong>${formatDateDisplay(p.fechaPago)}</strong></span>
         </div>
         <div class="flex items-center gap-2">
           <span class="px-2.5 py-1 rounded-full text-xs font-bold font-mono bg-purple-100 text-brand dark:bg-purple-950/60 dark:text-brand">
@@ -892,14 +965,15 @@ export function renderPagosModule(container) {
         <!-- Beneficiario -->
         <div class="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 space-y-2">
           <h4 class="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5 pb-1 border-b border-slate-100 dark:border-slate-800">
-            <i class="${isProv ? 'fa-solid fa-truck-field' : 'fa-solid fa-user'} text-brand"></i>
-            <span>Beneficiario (${isProv ? 'Proveedor' : 'Cliente'})</span>
+            <i class="${benIcon} text-brand"></i>
+            <span>Beneficiario (${escapeHtml(tipo)})</span>
           </h4>
-          <p class="text-sm font-black text-slate-900 dark:text-white">${escapeHtml(isProv ? p.proveedorNombre : p.clienteNombre)}</p>
+          <p class="text-sm font-black text-slate-900 dark:text-white">${escapeHtml(benNombre)}</p>
           <div class="space-y-1 text-slate-600 dark:text-slate-300">
-            <p><strong>Documento / RUC:</strong> ${escapeHtml(isProv ? p.proveedorRuc || 'No registrado' : p.clienteDocumento || 'No registrado')}</p>
-            ${!isProv && p.clienteTelefono ? `<p><strong>Teléfono / WhatsApp:</strong> ${escapeHtml(p.clienteTelefono)}</p>` : ''}
-            <p><strong>Tipo:</strong> ${isProv && p.esProveedorTemporal ? '<span class="text-amber-500 font-semibold">Temporal / Manual</span>' : '<span class="text-emerald-600 font-semibold">Registrado en Base de Datos</span>'}</p>
+            ${isOtros && p.referenciaPago ? `<p><strong>Referencia de Pago:</strong> <span class="text-brand font-bold">${escapeHtml(p.referenciaPago)}</span></p>` : ''}
+            <p><strong>Documento / RUC:</strong> ${escapeHtml(benDoc)}</p>
+            ${!isProv && !isColab && !isOtros && p.clienteTelefono ? `<p><strong>Teléfono / WhatsApp:</strong> ${escapeHtml(p.clienteTelefono)}</p>` : ''}
+            <p><strong>Registro:</strong> ${isProv && p.esProveedorTemporal ? '<span class="text-amber-500 font-semibold">Temporal / Manual</span>' : isOtros || isColab ? `<span class="text-brand font-semibold">${escapeHtml(tipo)}</span>` : '<span class="text-emerald-600 font-semibold">Registrado en Base de Datos</span>'}</p>
           </div>
         </div>
 
@@ -907,16 +981,53 @@ export function renderPagosModule(container) {
         <div class="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 space-y-2">
           <h4 class="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5 pb-1 border-b border-slate-100 dark:border-slate-800">
             <i class="fa-solid fa-box text-brand"></i>
-            <span>Producto Suministrado / Involucrado</span>
+            <span>Producto / Concepto Suministrado</span>
           </h4>
           <p class="text-sm font-black text-slate-900 dark:text-white">${escapeHtml(p.productoNombre)}</p>
           <div class="space-y-1 text-slate-600 dark:text-slate-300">
-            <p><strong>Cantidad Comprada:</strong> <span class="font-bold">${p.cantidad}</span></p>
+            <p><strong>Cantidad:</strong> <span class="font-bold">${p.cantidad}</span></p>
             <p><strong>Costo Total Asignado:</strong> <span class="font-mono font-bold text-brand">${formatGuaranies(p.montoTotal)}</span></p>
-            <p><strong>Tipo de Producto:</strong> ${p.esProductoTemporal ? '<span class="text-amber-500 font-semibold">Temporal / Manual</span>' : '<span class="text-emerald-600 font-semibold">Catálogo Oficial</span>'}</p>
+            <p><strong>Tipo de Ítem:</strong> ${p.esProductoTemporal ? '<span class="text-amber-500 font-semibold">Temporal / Manual</span>' : '<span class="text-emerald-600 font-semibold">Catálogo Oficial</span>'}</p>
           </div>
         </div>
       </div>
+
+      ${
+        historialParciales.length > 0
+          ? `
+        <!-- Historial de Pagos Parciales con Fechas y Semanas -->
+        <div class="p-4 rounded-xl border border-brand/30 bg-purple-50/40 dark:bg-purple-950/20 space-y-2.5">
+          <h4 class="text-xs font-bold uppercase tracking-wider text-brand flex items-center gap-1.5 pb-1 border-b border-brand/20">
+            <i class="fa-solid fa-calendar-week"></i>
+            <span>Registro de Pagos Parciales (Fechas y Semanas Asignadas)</span>
+          </h4>
+          <div class="space-y-1.5">
+            ${historialParciales
+              .map(
+                (hp, idx) => `
+              <div class="flex flex-wrap items-center justify-between gap-2 p-2.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800">
+                <div class="flex items-center gap-2">
+                  <span class="w-5 h-5 rounded-full bg-brand text-white text-[10px] font-bold flex items-center justify-center">#${idx + 1}</span>
+                  <div>
+                    <p class="font-bold text-slate-800 dark:text-slate-100">Fecha de Pago: ${formatDateDisplay(hp.fechaPago)}</p>
+                    <p class="text-[10px] text-slate-500">${escapeHtml(hp.metodoPago || p.metodoPago || 'Efectivo')}${hp.notas ? ` · ${escapeHtml(hp.notas)}` : ''}</p>
+                  </div>
+                </div>
+                <div class="flex items-center gap-2">
+                  <span class="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-purple-100 text-brand dark:bg-brand/20 dark:text-brand">
+                    Semana ${hp.semanaIso || p.semanaIso} (${hp.anioIso || p.anioIso || 2026})
+                  </span>
+                  <span class="font-mono font-black text-emerald-600 dark:text-emerald-400 text-xs">${formatGuaranies(hp.monto)}</span>
+                </div>
+              </div>
+            `
+              )
+              .join('')}
+          </div>
+        </div>
+      `
+          : ''
+      }
 
       <!-- Destinado a: Cliente y Pedido -->
       <div class="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-purple-50/30 dark:bg-purple-950/20 space-y-2">
@@ -1010,6 +1121,9 @@ export function renderPagosModule(container) {
     let selectedProd = null;
     let estadoPago = 'Pendiente';
 
+    const todayStr = getTodayISODate();
+    const initialIso = getISOWeekAndYearFromStr(todayStr);
+
     const content = document.createElement('div');
     content.className = 'space-y-4 text-xs';
 
@@ -1017,14 +1131,18 @@ export function renderPagosModule(container) {
       <!-- 1. Tipo de Beneficiario -->
       <div>
         <label class="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">Tipo de Beneficiario</label>
-        <div class="grid grid-cols-2 gap-2">
-          <button type="button" id="btn-tipo-prov" class="py-2 px-3 rounded-xl text-xs font-bold border transition cursor-pointer flex items-center justify-center gap-2 bg-brand text-white border-brand shadow-xs">
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+          <button type="button" id="btn-tipo-prov" class="py-2.5 px-3 rounded-xl text-xs font-bold border transition cursor-pointer flex items-center justify-center gap-2 bg-brand text-white border-brand shadow-xs">
             <i class="fa-solid fa-truck-field"></i>
             <span>Proveedor</span>
           </button>
-          <button type="button" id="btn-tipo-cli" class="py-2 px-3 rounded-xl text-xs font-bold border transition cursor-pointer flex items-center justify-center gap-2 border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300">
-            <i class="fa-solid fa-user"></i>
-            <span>Cliente</span>
+          <button type="button" id="btn-tipo-colab" class="py-2.5 px-3 rounded-xl text-xs font-bold border transition cursor-pointer flex items-center justify-center gap-2 border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+            <i class="fa-solid fa-user-tie"></i>
+            <span>Colaborador</span>
+          </button>
+          <button type="button" id="btn-tipo-otros" class="py-2.5 px-3 rounded-xl text-xs font-bold border transition cursor-pointer flex items-center justify-center gap-2 border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+            <i class="fa-solid fa-tags"></i>
+            <span>Otros</span>
           </button>
         </div>
       </div>
@@ -1067,19 +1185,37 @@ export function renderPagosModule(container) {
         </div>
       </div>
 
-      <!-- Cuadro dinámico de Pago Parcial -->
-      <div id="modal-partial-box" class="p-3.5 rounded-xl bg-purple-50 dark:bg-purple-950/30 border border-brand/30 space-y-2 hidden">
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 items-center">
+      <!-- Cuadro dinámico de Pago Parcial (con Fecha y Semana del Pago Parcial) -->
+      <div id="modal-partial-box" class="p-4 rounded-xl bg-purple-50 dark:bg-purple-950/30 border border-brand/30 space-y-3 hidden">
+        <div class="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-brand/20">
+          <div class="flex items-center gap-1.5 text-brand font-bold">
+            <i class="fa-solid fa-calendar-check"></i>
+            <span>Detalle del Pago Parcial (Fecha y Semana Asignada)</span>
+          </div>
+          <span id="modal-semana-parcial-badge" class="px-2.5 py-1 rounded-full text-xs font-mono font-black bg-brand text-white shadow-2xs">
+            Semana ${initialIso.week} (${initialIso.year})
+          </span>
+        </div>
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 items-center">
           <div>
-            <label class="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Monto Abonado / Pagado (Gs.)</label>
+            <label class="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Monto Abonado / Pagado (Gs.) *</label>
             <input type="text" id="modal-monto-pagado" value="0 Gs."
               class="w-full px-3 py-2 text-xs sm:text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono font-bold focus:outline-none focus:ring-2 focus:ring-brand" />
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Fecha del Pago Parcial *</label>
+            <input type="date" id="modal-fecha-parcial" value="${todayStr}"
+              class="w-full px-3 py-2 text-xs sm:text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-semibold focus:outline-none focus:ring-2 focus:ring-brand" />
           </div>
           <div class="p-2.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex flex-col justify-center">
             <span class="text-[10px] uppercase font-bold text-slate-500">Saldo Pendiente Calculado</span>
             <span id="modal-saldo-calc" class="text-sm font-mono font-black text-danger">0 Gs.</span>
           </div>
         </div>
+        <p class="text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+          <i class="fa-solid fa-circle-info text-brand"></i>
+          <span>El pago parcial tomará automáticamente la fecha seleccionada y se asignará a la semana correspondiente.</span>
+        </p>
       </div>
 
       <!-- Método de Pago y Fecha -->
@@ -1097,8 +1233,11 @@ export function renderPagosModule(container) {
           </select>
         </div>
         <div>
-          <label class="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Fecha del Pago</label>
-          <input type="date" id="pago-fecha" value="${getTodayISODate()}"
+          <div class="flex items-center justify-between mb-1">
+            <label class="block text-xs font-bold text-slate-700 dark:text-slate-300">Fecha del Pago</label>
+            <span id="pago-fecha-semana-hint" class="text-[10px] font-mono font-bold text-brand">Semana ${initialIso.week} (${initialIso.year})</span>
+          </div>
+          <input type="date" id="pago-fecha" value="${todayStr}"
             class="w-full px-3.5 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-brand" />
         </div>
       </div>
@@ -1129,9 +1268,18 @@ export function renderPagosModule(container) {
     content.querySelector('#counter-holder').appendChild(counter.element);
 
     const btnTipoProv = content.querySelector('#btn-tipo-prov');
-    const btnTipoCli = content.querySelector('#btn-tipo-cli');
+    const btnTipoColab = content.querySelector('#btn-tipo-colab');
+    const btnTipoOtros = content.querySelector('#btn-tipo-otros');
     const benBox = content.querySelector('#beneficiario-box');
     const prodBox = content.querySelector('#producto-box');
+
+    function updateTipoButtonsStyle() {
+      const activeClass = 'py-2.5 px-3 rounded-xl text-xs font-bold border transition cursor-pointer flex items-center justify-center gap-2 bg-brand text-white border-brand shadow-xs';
+      const inactiveClass = 'py-2.5 px-3 rounded-xl text-xs font-bold border transition cursor-pointer flex items-center justify-center gap-2 border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300';
+      btnTipoProv.className = tipoBeneficiario === 'Proveedor' ? activeClass : inactiveClass;
+      btnTipoColab.className = tipoBeneficiario === 'Colaborador' ? activeClass : inactiveClass;
+      btnTipoOtros.className = tipoBeneficiario === 'Otros' ? activeClass : inactiveClass;
+    }
 
     function renderBeneficiarioUI() {
       benBox.innerHTML = '';
@@ -1227,40 +1375,54 @@ export function renderPagosModule(container) {
           `;
           benBox.appendChild(fields);
         }
-      } else {
+      } else if (tipoBeneficiario === 'Colaborador') {
         benBox.innerHTML = `
-          <label class="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Seleccionar o Escribir Cliente *</label>
-          <div class="relative">
-            <i class="fa-solid fa-user absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 text-xs"></i>
-            <input type="text" id="modal-cli-input" placeholder="Nombre del cliente o empresa..."
-              class="w-full pl-9 pr-3.5 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-brand" />
+          <div class="flex items-center justify-between gap-2 pb-2 border-b border-slate-200 dark:border-slate-700">
+            <span class="text-xs font-bold text-slate-800 dark:text-slate-100 flex items-center gap-1.5">
+              <i class="fa-solid fa-user-tie text-brand"></i>
+              <span>Datos del Colaborador</span>
+            </span>
           </div>
-          <div id="modal-cli-sug" class="mt-1 max-h-40 overflow-y-auto bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-lg hidden"></div>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div class="relative">
+              <label class="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Seleccionar o Escribir Colaborador *</label>
+              <div class="relative">
+                <i class="fa-solid fa-user-tie absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 text-xs"></i>
+                <input type="text" id="modal-colab-input" placeholder="Nombre del colaborador..."
+                  class="w-full pl-9 pr-3.5 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-brand" />
+              </div>
+              <div id="modal-colab-sug" class="absolute left-0 right-0 top-full mt-1 max-h-40 overflow-y-auto bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-lg z-30 hidden"></div>
+            </div>
+            <div>
+              <label class="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Documento / CI o Cargo (Opcional)</label>
+              <input type="text" id="modal-colab-doc" placeholder="Ej. CI 4.567.890 o Producción / Diseño"
+                class="w-full px-3.5 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-brand" />
+            </div>
+          </div>
         `;
 
-        const inp = benBox.querySelector('#modal-cli-input');
-        const sug = benBox.querySelector('#modal-cli-sug');
+        const inp = benBox.querySelector('#modal-colab-input');
+        const docInp = benBox.querySelector('#modal-colab-doc');
+        const sug = benBox.querySelector('#modal-colab-sug');
 
-        inp.addEventListener('input', (e) => {
-          const clean = e.target.value.toLowerCase().trim();
-          if (!clean) {
-            sug.classList.add('hidden');
-            return;
-          }
-          const filtered = state.catalogoClientes.filter((c) => {
-            const nom = (c.nombres || c.razonSocial || c.nombreFantasia || '').toLowerCase();
-            const tel = (c.whatsappCompleto || '').toLowerCase();
-            return nom.includes(clean) || tel.includes(clean);
+        function renderColabSug(q) {
+          const clean = q.toLowerCase().trim();
+          const list = Array.isArray(state.catalogoColaboradores) ? state.catalogoColaboradores : [];
+          const filtered = list.filter((u) => {
+            const nom = (u.nombre || u.name || u.username || u.email || '').toLowerCase();
+            return !clean || nom.includes(clean);
           });
           sug.innerHTML = '';
           if (filtered.length > 0) {
-            filtered.slice(0, 5).forEach((c) => {
+            filtered.slice(0, 6).forEach((u) => {
               const r = document.createElement('div');
-              r.className = 'px-3.5 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-700/50 cursor-pointer text-xs border-b border-slate-100 dark:border-slate-700/50 last:border-b-0';
-              const nom = c.tipoCliente === 'empresa' ? c.razonSocial : `${c.nombres || ''} ${c.apellidos || ''}`.trim();
-              r.innerHTML = `<span class="font-bold">${escapeHtml(nom)}</span> <span class="text-slate-400 text-[10px]">(${escapeHtml(c.whatsappCompleto || '')})</span>`;
+              r.className = 'px-3.5 py-2 hover:bg-slate-50 dark:hover:bg-slate-700/50 cursor-pointer text-xs border-b border-slate-100 dark:border-slate-700/50 last:border-b-0';
+              const nom = u.nombre || u.name || u.username || u.email || '';
+              const rol = u.rol || u.role || '';
+              r.innerHTML = `<span class="font-bold text-slate-800 dark:text-slate-100">${escapeHtml(nom)}</span> ${rol ? `<span class="text-slate-400 text-[10px]">(${escapeHtml(rol)})</span>` : ''}`;
               r.addEventListener('click', () => {
                 inp.value = nom;
+                if (rol && docInp && !docInp.value) docInp.value = rol;
                 sug.classList.add('hidden');
               });
               sug.appendChild(r);
@@ -1269,21 +1431,74 @@ export function renderPagosModule(container) {
           } else {
             sug.classList.add('hidden');
           }
+        }
+
+        inp.addEventListener('focus', () => renderColabSug(inp.value));
+        inp.addEventListener('input', (e) => renderColabSug(e.target.value));
+        document.addEventListener('click', (e) => {
+          if (!benBox.contains(e.target)) sug.classList.add('hidden');
+        }, { capture: true });
+      } else if (tipoBeneficiario === 'Otros') {
+        benBox.innerHTML = `
+          <div class="flex items-center justify-between gap-2 pb-2 border-b border-slate-200 dark:border-slate-700">
+            <span class="text-xs font-bold text-slate-800 dark:text-slate-100 flex items-center gap-1.5">
+              <i class="fa-solid fa-tags text-brand"></i>
+              <span>Especificación de Opción de Pago (Otros)</span>
+            </span>
+          </div>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">¿A qué hace referencia la opción de Pago? *</label>
+              <div class="relative">
+                <i class="fa-solid fa-pen-clip absolute left-3.5 top-1/2 -translate-y-1/2 text-brand text-xs"></i>
+                <input type="text" id="modal-otros-referencia" placeholder="Escriba a qué hace referencia el pago (Ej. Alquiler, ANDE, Flete, Servicios...)"
+                  class="w-full pl-9 pr-3.5 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-brand" />
+              </div>
+            </div>
+            <div>
+              <label class="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Beneficiario / Entidad o Documento (Opcional)</label>
+              <input type="text" id="modal-otros-beneficiario" placeholder="Ej. Nombre de entidad, persona o RUC"
+                class="w-full px-3.5 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-brand" />
+            </div>
+          </div>
+        `;
+
+        // Sincronizar con el concepto/producto temporal si está vacío
+        const refInp = benBox.querySelector('#modal-otros-referencia');
+        refInp?.addEventListener('input', () => {
+          const tempProdInp = content.querySelector('#modal-prod-temp-name');
+          if (tempProdInp && (!tempProdInp.dataset.userEdited || !tempProdInp.value.trim())) {
+            tempProdInp.value = refInp.value;
+          }
         });
       }
     }
 
     btnTipoProv.addEventListener('click', () => {
       tipoBeneficiario = 'Proveedor';
-      btnTipoProv.className = 'py-2 px-3 rounded-xl text-xs font-bold border transition cursor-pointer flex items-center justify-center gap-2 bg-brand text-white border-brand shadow-xs';
-      btnTipoCli.className = 'py-2 px-3 rounded-xl text-xs font-bold border transition cursor-pointer flex items-center justify-center gap-2 border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300';
+      updateTipoButtonsStyle();
       renderBeneficiarioUI();
     });
 
-    btnTipoCli.addEventListener('click', () => {
-      tipoBeneficiario = 'Cliente';
-      btnTipoCli.className = 'py-2 px-3 rounded-xl text-xs font-bold border transition cursor-pointer flex items-center justify-center gap-2 bg-brand text-white border-brand shadow-xs';
-      btnTipoProv.className = 'py-2 px-3 rounded-xl text-xs font-bold border transition cursor-pointer flex items-center justify-center gap-2 border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300';
+    btnTipoColab.addEventListener('click', () => {
+      tipoBeneficiario = 'Colaborador';
+      updateTipoButtonsStyle();
+      if (!isProdTemporal) {
+        isProdTemporal = true;
+        selectedProd = null;
+        renderProductoUI();
+      }
+      renderBeneficiarioUI();
+    });
+
+    btnTipoOtros.addEventListener('click', () => {
+      tipoBeneficiario = 'Otros';
+      updateTipoButtonsStyle();
+      if (!isProdTemporal) {
+        isProdTemporal = true;
+        selectedProd = null;
+        renderProductoUI();
+      }
       renderBeneficiarioUI();
     });
 
@@ -1294,10 +1509,10 @@ export function renderPagosModule(container) {
       prodBox.innerHTML = '';
       const topRow = document.createElement('div');
       topRow.className = 'flex items-center justify-between gap-2 pb-2 border-b border-slate-200 dark:border-slate-700';
-      topRow.innerHTML = `<span class="text-xs font-bold text-slate-800 dark:text-slate-100">Producto o Insumo</span>`;
+      topRow.innerHTML = `<span class="text-xs font-bold text-slate-800 dark:text-slate-100">Producto, Insumo o Concepto</span>`;
 
       const prodToggle = createIOSToggle({
-        label: 'Producto temporal / manual',
+        label: 'Producto / concepto temporal o manual',
         checked: isProdTemporal,
         activeColor: 'emerald',
         onChange: (chk) => {
@@ -1374,20 +1589,50 @@ export function renderPagosModule(container) {
       } else {
         const wrap = document.createElement('div');
         wrap.innerHTML = `
-          <label class="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Nombre del Producto / Insumo Temporal *</label>
-          <input type="text" id="modal-prod-temp-name" placeholder="Ej. Tinta para sublimación negra 1L"
+          <label class="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Nombre del Producto / Insumo o Concepto *</label>
+          <input type="text" id="modal-prod-temp-name" placeholder="Ej. Tinta para sublimación negra 1L, Pago de quincena, Servicio..."
             class="w-full px-3.5 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-brand" />
         `;
+        const tempInp = wrap.querySelector('#modal-prod-temp-name');
+        tempInp?.addEventListener('input', () => {
+          tempInp.dataset.userEdited = 'true';
+        });
         prodBox.appendChild(wrap);
       }
     }
     renderProductoUI();
 
-    // Cálculos de montos y saldo
+    // Cálculos de montos, fechas y semana de Pago Parcial
     const totalInp = content.querySelector('#pago-monto-total');
     const montoPagadoInp = content.querySelector('#modal-monto-pagado');
+    const fechaParcialInp = content.querySelector('#modal-fecha-parcial');
+    const semanaParcialBadge = content.querySelector('#modal-semana-parcial-badge');
+    const pagoFechaInp = content.querySelector('#pago-fecha');
+    const pagoFechaHint = content.querySelector('#pago-fecha-semana-hint');
     const saldoCalcEl = content.querySelector('#modal-saldo-calc');
     const partialBox = content.querySelector('#modal-partial-box');
+
+    function syncPartialDateBadge(dateStr) {
+      const iso = getISOWeekAndYearFromStr(dateStr);
+      if (semanaParcialBadge) {
+        semanaParcialBadge.textContent = `Semana ${iso.week} (${iso.year})`;
+      }
+      if (pagoFechaHint) {
+        pagoFechaHint.textContent = `Semana ${iso.week} (${iso.year})`;
+      }
+    }
+
+    fechaParcialInp?.addEventListener('change', (e) => {
+      const val = e.target.value || getTodayISODate();
+      if (pagoFechaInp) pagoFechaInp.value = val;
+      syncPartialDateBadge(val);
+    });
+
+    pagoFechaInp?.addEventListener('change', (e) => {
+      const val = e.target.value || getTodayISODate();
+      if (fechaParcialInp) fechaParcialInp.value = val;
+      syncPartialDateBadge(val);
+    });
 
     function updateMath() {
       const tot = parseGuaranies(totalInp.value);
@@ -1432,6 +1677,10 @@ export function renderPagosModule(container) {
 
         if (estadoPago === 'Pago Parcial') {
           partialBox.classList.remove('hidden');
+          if (fechaParcialInp && pagoFechaInp) {
+            fechaParcialInp.value = pagoFechaInp.value || getTodayISODate();
+            syncPartialDateBadge(fechaParcialInp.value);
+          }
         } else {
           partialBox.classList.add('hidden');
         }
@@ -1497,6 +1746,7 @@ export function renderPagosModule(container) {
         let provNombre = '';
         let provRuc = '';
         let provId = null;
+        let referenciaPago = '';
         let cliNombre = '';
         let cliId = null;
 
@@ -1517,13 +1767,25 @@ export function renderPagosModule(container) {
             toast.error('Indique el nombre del proveedor.');
             return;
           }
-        } else {
-          const cliInp = content.querySelector('#modal-cli-input');
-          cliNombre = cliInp ? cliInp.value.trim() : '';
-          if (!cliNombre) {
-            toast.error('Indique el nombre del cliente.');
+        } else if (tipoBeneficiario === 'Colaborador') {
+          const colabInp = content.querySelector('#modal-colab-input');
+          const colabDocInp = content.querySelector('#modal-colab-doc');
+          provNombre = colabInp ? colabInp.value.trim() : '';
+          provRuc = colabDocInp ? colabDocInp.value.trim() : '';
+          if (!provNombre) {
+            toast.error('Indique el nombre del colaborador.');
             return;
           }
+        } else if (tipoBeneficiario === 'Otros') {
+          const refInp = content.querySelector('#modal-otros-referencia');
+          const benInp = content.querySelector('#modal-otros-beneficiario');
+          referenciaPago = refInp ? refInp.value.trim() : '';
+          const benExtra = benInp ? benInp.value.trim() : '';
+          if (!referenciaPago) {
+            toast.error('Escriba a qué hace referencia la opción de pago en "Otros".');
+            return;
+          }
+          provNombre = benExtra || referenciaPago;
         }
 
         let prodNombre = '';
@@ -1537,8 +1799,13 @@ export function renderPagosModule(container) {
           prodId = selectedProd?.id || null;
         }
 
+        if (!prodNombre && tipoBeneficiario === 'Otros' && referenciaPago) {
+          prodNombre = referenciaPago;
+          isProdTemporal = true;
+        }
+
         if (!prodNombre) {
-          toast.error('Indique el nombre del producto.');
+          toast.error('Indique el nombre del producto o concepto.');
           return;
         }
 
@@ -1547,6 +1814,11 @@ export function renderPagosModule(container) {
           toast.error('El monto total debe ser mayor a 0 Gs.');
           return;
         }
+
+        const metodo = content.querySelector('#pago-metodo').value;
+        let fecha = content.querySelector('#pago-fecha').value || getTodayISODate();
+        let fechaParcial = '';
+        let historialParciales = [];
 
         let montoPagado = 0;
         let saldoPendiente = montoTotal;
@@ -1558,13 +1830,27 @@ export function renderPagosModule(container) {
           saldoPendiente = montoTotal;
         } else if (estadoPago === 'Pago Parcial') {
           montoPagado = parseGuaranies(montoPagadoInp.value);
-          if (montoPagado < 0) montoPagado = 0;
+          if (montoPagado <= 0) {
+            toast.error('Ingrese el monto abonado para el Pago Parcial.');
+            return;
+          }
           if (montoPagado > montoTotal) montoPagado = montoTotal;
           saldoPendiente = Math.max(0, montoTotal - montoPagado);
+
+          fechaParcial = (fechaParcialInp && fechaParcialInp.value) ? fechaParcialInp.value : fecha;
+          fecha = fechaParcial; // Tomar la fecha y semana del pago parcial agregado
+          const isoParcial = getISOWeekAndYearFromStr(fechaParcial);
+          historialParciales = [
+            {
+              monto: montoPagado,
+              fechaPago: fechaParcial,
+              semanaIso: isoParcial.week,
+              anioIso: isoParcial.year,
+              metodoPago: metodo,
+            },
+          ];
         }
 
-        const metodo = content.querySelector('#pago-metodo').value;
-        const fecha = content.querySelector('#pago-fecha').value || getTodayISODate();
         const pedSelect = content.querySelector('#pago-pedido-select');
         const pedidoIdVal = pedSelect && pedSelect.value ? Number(pedSelect.value) : null;
         const notasVal = content.querySelector('#pago-notas').value.trim();
@@ -1583,10 +1869,11 @@ export function renderPagosModule(container) {
 
         const payload = {
           tipoBeneficiario: tipoBeneficiario,
+          referenciaPago: referenciaPago,
           proveedorId: provId,
           proveedorNombre: provNombre,
           proveedorRuc: provRuc,
-          esProveedorTemporal: isProvTemporal,
+          esProveedorTemporal: tipoBeneficiario === 'Proveedor' ? isProvTemporal : true,
           clienteId: cliId,
           clienteNombre: cliNombre,
           clienteDocumento: cliDoc,
@@ -1601,6 +1888,8 @@ export function renderPagosModule(container) {
           estadoPago: estadoPago,
           metodoPago: metodo,
           fechaPago: fecha,
+          fechaPagoParcial: fechaParcial,
+          historialParciales: historialParciales,
           pedidoId: pedidoIdVal,
           notas: notasVal,
         };
@@ -1626,10 +1915,29 @@ export function renderPagosModule(container) {
   }
 
   // ==========================================================================
-  // 7. MODAL: EDITAR PAGO EXISTENTE (Con auto-actualización inmediata)
+  // 7. MODAL: EDITAR PAGO EXISTENTE (Con registro de fecha y semana de Pagos Parciales)
   // ==========================================================================
   function openEditarPagoModal(pago) {
     let estadoPago = pago.estadoPago || 'Pendiente';
+    const initialMontoPagado = Number(pago.montoPagado) || 0;
+    let historialParciales = Array.isArray(pago.historialParciales)
+      ? pago.historialParciales.map((item) => ({ ...item }))
+      : [];
+
+    if (historialParciales.length === 0 && pago.estadoPago === 'Pago Parcial' && initialMontoPagado > 0) {
+      const f = pago.fechaPago || getTodayISODate();
+      const iso = getISOWeekAndYearFromStr(f);
+      historialParciales.push({
+        monto: initialMontoPagado,
+        fechaPago: f,
+        semanaIso: pago.semanaIso || iso.week,
+        anioIso: pago.anioIso || iso.year,
+        metodoPago: pago.metodoPago || 'Efectivo',
+      });
+    }
+
+    const defaultPartialDate = pago.fechaPago || getTodayISODate();
+    const defaultPartialIso = getISOWeekAndYearFromStr(defaultPartialDate);
 
     const content = document.createElement('div');
     content.className = 'space-y-4 text-xs';
@@ -1637,12 +1945,13 @@ export function renderPagosModule(container) {
     content.innerHTML = `
       <div class="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 flex items-center justify-between">
         <div>
-          <span class="text-[10px] uppercase font-bold text-slate-500">Editando Pago</span>
+          <span class="text-[10px] uppercase font-bold text-slate-500">Editando Pago (${escapeHtml(pago.tipoBeneficiario || 'Proveedor')})</span>
           <p class="text-sm font-black text-brand font-mono">${escapeHtml(pago.numeroPago)}</p>
         </div>
         <div class="text-right">
           <span class="text-[10px] text-slate-400">Beneficiario</span>
-          <p class="font-bold text-slate-800 dark:text-slate-100">${escapeHtml(pago.proveedorNombre || pago.clienteNombre)}</p>
+          <p class="font-bold text-slate-800 dark:text-slate-100">${escapeHtml(pago.proveedorNombre || pago.referenciaPago || pago.clienteNombre)}</p>
+          ${pago.referenciaPago ? `<p class="text-[10px] text-brand font-semibold">Ref: ${escapeHtml(pago.referenciaPago)}</p>` : ''}
         </div>
       </div>
 
@@ -1685,10 +1994,46 @@ export function renderPagosModule(container) {
         </div>
       </div>
 
-      <div id="edit-partial-box" class="p-3.5 rounded-xl bg-purple-50 dark:bg-purple-950/30 border border-brand/30 space-y-2 ${estadoPago === 'Pago Parcial' ? '' : 'hidden'}">
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 items-center">
+      <div id="edit-partial-box" class="p-3.5 rounded-xl bg-purple-50 dark:bg-purple-950/30 border border-brand/30 space-y-3 ${estadoPago === 'Pago Parcial' ? '' : 'hidden'}">
+        <div class="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-brand/20">
+          <span class="text-xs font-bold text-brand flex items-center gap-1.5">
+            <i class="fa-solid fa-calendar-check"></i>
+            <span>Control de Pago Parcial (Fecha y Semana)</span>
+          </span>
+          <span id="edit-semana-parcial-badge" class="px-2.5 py-0.5 rounded-full text-[11px] font-mono font-black bg-brand text-white">
+            Semana ${defaultPartialIso.week} (${defaultPartialIso.year})
+          </span>
+        </div>
+
+        <!-- Agregar nuevo pago parcial por fecha -->
+        <div class="p-3 rounded-xl bg-white dark:bg-slate-900 border border-brand/20 space-y-2">
+          <span class="text-[11px] font-bold text-slate-700 dark:text-slate-200 block">Agregar nuevo abono parcial con su fecha y semana:</span>
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 items-end">
+            <div>
+              <label class="block text-[10px] font-bold text-slate-500 mb-1">Monto del Abono (Gs.)</label>
+              <input type="text" id="edit-nuevo-abono" placeholder="Ej. 150.000 Gs."
+                class="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white font-mono font-bold focus:outline-none focus:ring-2 focus:ring-brand" />
+            </div>
+            <div>
+              <label class="block text-[10px] font-bold text-slate-500 mb-1">Fecha del Abono Parcial</label>
+              <input type="date" id="edit-fecha-parcial" value="${defaultPartialDate}"
+                class="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white font-semibold focus:outline-none focus:ring-2 focus:ring-brand" />
+            </div>
+            <div>
+              <button type="button" id="btn-add-parcial" class="w-full py-1.5 px-3 rounded-lg bg-brand hover:bg-brand-hover text-white font-bold text-xs transition cursor-pointer flex items-center justify-center gap-1.5">
+                <i class="fa-solid fa-plus"></i>
+                <span>Agregar Abono</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Historial de pagos parciales cargados -->
+        <div id="edit-historial-parciales-list" class="space-y-1.5"></div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 items-center pt-1">
           <div>
-            <label class="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Monto Abonado / Pagado (Gs.)</label>
+            <label class="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Total Abonado Acumulado (Gs.)</label>
             <input type="text" id="edit-monto-pagado" value="${formatGuaranies(pago.montoPagado)}"
               class="w-full px-3 py-2 text-xs sm:text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono font-bold focus:outline-none focus:ring-2 focus:ring-brand" />
           </div>
@@ -1701,7 +2046,7 @@ export function renderPagosModule(container) {
 
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>
-          <label class="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Fecha del Pago</label>
+          <label class="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Fecha del Pago (Última / Vigente)</label>
           <input type="date" id="edit-fecha" value="${pago.fechaPago || getTodayISODate()}"
             class="w-full px-3.5 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-brand" />
         </div>
@@ -1716,8 +2061,109 @@ export function renderPagosModule(container) {
 
     const totalInp = content.querySelector('#edit-monto-total');
     const montoPagadoInp = content.querySelector('#edit-monto-pagado');
+    const nuevoAbonoInp = content.querySelector('#edit-nuevo-abono');
+    const fechaParcialInp = content.querySelector('#edit-fecha-parcial');
+    const editFechaInp = content.querySelector('#edit-fecha');
+    const semanaBadge = content.querySelector('#edit-semana-parcial-badge');
+    const histListEl = content.querySelector('#edit-historial-parciales-list');
     const saldoCalcEl = content.querySelector('#edit-saldo-calc');
     const partialBox = content.querySelector('#edit-partial-box');
+
+    function renderHistorialList() {
+      if (!histListEl) return;
+      if (historialParciales.length === 0) {
+        histListEl.innerHTML = `<p class="text-[11px] text-slate-400 italic">Aún no se han registrado pagos parciales individuales.</p>`;
+        return;
+      }
+      histListEl.innerHTML = `
+        <span class="text-[10px] uppercase font-bold text-slate-500 block">Pagos Parciales Registrados (${historialParciales.length}):</span>
+        <div class="space-y-1 max-h-36 overflow-y-auto pr-1">
+          ${historialParciales
+            .map(
+              (hp, idx) => `
+            <div class="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-[11px]">
+              <div class="flex items-center gap-2">
+                <span class="font-bold text-brand">#${idx + 1}</span>
+                <span class="font-semibold text-slate-700 dark:text-slate-200">${formatDateDisplay(hp.fechaPago)}</span>
+                <span class="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-purple-100 text-brand dark:bg-brand/20 dark:text-brand">
+                  Semana ${hp.semanaIso} (${hp.anioIso})
+                </span>
+              </div>
+              <div class="flex items-center gap-2">
+                <span class="font-mono font-bold text-emerald-600 dark:text-emerald-400">${formatGuaranies(hp.monto)}</span>
+                <button type="button" data-del-idx="${idx}" class="text-slate-400 hover:text-danger transition cursor-pointer" title="Quitar este abono">
+                  <i class="fa-solid fa-xmark"></i>
+                </button>
+              </div>
+            </div>
+          `
+            )
+            .join('')}
+        </div>
+      `;
+
+      histListEl.querySelectorAll('[data-del-idx]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const i = Number(btn.dataset.delIdx);
+          historialParciales.splice(i, 1);
+          const sum = historialParciales.reduce((acc, item) => acc + (Number(item.monto) || 0), 0);
+          montoPagadoInp.value = formatGuaranies(sum);
+          if (historialParciales.length > 0) {
+            const last = historialParciales[historialParciales.length - 1];
+            editFechaInp.value = last.fechaPago;
+          }
+          renderHistorialList();
+          updateMath();
+        });
+      });
+    }
+
+    renderHistorialList();
+
+    fechaParcialInp?.addEventListener('change', (e) => {
+      const f = e.target.value || getTodayISODate();
+      const iso = getISOWeekAndYearFromStr(f);
+      if (semanaBadge) semanaBadge.textContent = `Semana ${iso.week} (${iso.year})`;
+      if (editFechaInp) editFechaInp.value = f;
+    });
+
+    editFechaInp?.addEventListener('change', (e) => {
+      const f = e.target.value || getTodayISODate();
+      if (fechaParcialInp) fechaParcialInp.value = f;
+      const iso = getISOWeekAndYearFromStr(f);
+      if (semanaBadge) semanaBadge.textContent = `Semana ${iso.week} (${iso.year})`;
+    });
+
+    nuevoAbonoInp?.addEventListener('input', (e) => {
+      e.target.value = formatGuaranies(parseGuaranies(e.target.value));
+    });
+
+    content.querySelector('#btn-add-parcial')?.addEventListener('click', () => {
+      const abono = parseGuaranies(nuevoAbonoInp.value);
+      if (abono <= 0) {
+        toast.error('Ingrese un monto de abono parcial mayor a 0 Gs.');
+        return;
+      }
+      const f = fechaParcialInp.value || getTodayISODate();
+      const iso = getISOWeekAndYearFromStr(f);
+      const metodoActual = content.querySelector('#edit-metodo').value || 'Efectivo';
+
+      historialParciales.push({
+        monto: abono,
+        fechaPago: f,
+        semanaIso: iso.week,
+        anioIso: iso.year,
+        metodoPago: metodoActual,
+      });
+
+      const sum = historialParciales.reduce((acc, item) => acc + (Number(item.monto) || 0), 0);
+      montoPagadoInp.value = formatGuaranies(sum);
+      editFechaInp.value = f;
+      nuevoAbonoInp.value = '';
+      renderHistorialList();
+      updateMath();
+      toast.success(`Abono de ${formatGuaranies(abono)} asignado a la Semana ${iso.week} (${formatDateDisplay(f)}).`);
+    });
 
     function updateMath() {
       const tot = parseGuaranies(totalInp.value);
@@ -1780,6 +2226,10 @@ export function renderPagosModule(container) {
           return false;
         }
 
+        const metodoVal = content.querySelector('#edit-metodo').value;
+        let fechaVal = editFechaInp.value || pago.fechaPago || getTodayISODate();
+        let fechaParcialVal = '';
+
         let montoPagado = 0;
         let saldoPendiente = montoTotal;
         if (estadoPago === 'Pagado') {
@@ -1788,11 +2238,66 @@ export function renderPagosModule(container) {
         } else if (estadoPago === 'Pendiente') {
           montoPagado = 0;
           saldoPendiente = montoTotal;
+          historialParciales = [];
         } else if (estadoPago === 'Pago Parcial') {
-          montoPagado = parseGuaranies(montoPagadoInp.value);
+          // Si el usuario escribió un monto en "nuevo abono" sin pulsar "+ Agregar Abono", lo sumamos automáticamente
+          const pendingNuevoAbono = nuevoAbonoInp ? parseGuaranies(nuevoAbonoInp.value) : 0;
+          const selectedPartialDate = (fechaParcialInp && fechaParcialInp.value) ? fechaParcialInp.value : fechaVal;
+          const isoSelected = getISOWeekAndYearFromStr(selectedPartialDate);
+
+          if (pendingNuevoAbono > 0) {
+            historialParciales.push({
+              monto: pendingNuevoAbono,
+              fechaPago: selectedPartialDate,
+              semanaIso: isoSelected.week,
+              anioIso: isoSelected.year,
+              metodoPago: metodoVal,
+            });
+            montoPagado = historialParciales.reduce((acc, item) => acc + (Number(item.monto) || 0), 0);
+          } else {
+            montoPagado = parseGuaranies(montoPagadoInp.value);
+            const sumHist = historialParciales.reduce((acc, item) => acc + (Number(item.monto) || 0), 0);
+            if (historialParciales.length === 0 && montoPagado > 0) {
+              historialParciales.push({
+                monto: montoPagado,
+                fechaPago: selectedPartialDate,
+                semanaIso: isoSelected.week,
+                anioIso: isoSelected.year,
+                metodoPago: metodoVal,
+              });
+            } else if (montoPagado > sumHist) {
+              // Se incrementó el monto pagado manualmente: registramos la diferencia con la fecha y semana seleccionada
+              historialParciales.push({
+                monto: montoPagado - sumHist,
+                fechaPago: selectedPartialDate,
+                semanaIso: isoSelected.week,
+                anioIso: isoSelected.year,
+                metodoPago: metodoVal,
+              });
+            } else if ( historialParciales.length === 1 && (montoPagado !== sumHist || historialParciales[0].fechaPago !== selectedPartialDate)) {
+              historialParciales[0] = {
+                ...historialParciales[0],
+                monto: montoPagado,
+                fechaPago: selectedPartialDate,
+                semanaIso: isoSelected.week,
+                anioIso: isoSelected.year,
+                metodoPago: metodoVal,
+              };
+            }
+          }
+
           if (montoPagado < 0) montoPagado = 0;
           if (montoPagado > montoTotal) montoPagado = montoTotal;
           saldoPendiente = Math.max(0, montoTotal - montoPagado);
+
+          if (historialParciales.length > 0) {
+            const latest = historialParciales[historialParciales.length - 1];
+            fechaParcialVal = latest.fechaPago || selectedPartialDate;
+            fechaVal = fechaParcialVal;
+          } else {
+            fechaParcialVal = selectedPartialDate;
+            fechaVal = selectedPartialDate;
+          }
         }
 
         const payload = {
@@ -1801,8 +2306,10 @@ export function renderPagosModule(container) {
           montoPagado: montoPagado,
           saldoPendiente: saldoPendiente,
           estadoPago: estadoPago,
-          metodoPago: content.querySelector('#edit-metodo').value,
-          fechaPago: content.querySelector('#edit-fecha').value || pago.fechaPago,
+          metodoPago: metodoVal,
+          fechaPago: fechaVal,
+          fechaPagoParcial: fechaParcialVal,
+          historialParciales: historialParciales,
           notas: content.querySelector('#edit-notas').value.trim(),
         };
 
@@ -1835,8 +2342,8 @@ export function renderPagosModule(container) {
       { id: 'fechaPago', label: 'Fecha de Pago', default: true, getValue: (r) => formatDateDisplay(r.fechaPago) },
       { id: 'semanaIso', label: 'Semana ISO', default: true, getValue: (r) => `Semana ${r.semanaIso}` },
       { id: 'tipoBeneficiario', label: 'Tipo Beneficiario', default: true, getValue: (r) => r.tipoBeneficiario },
-      { id: 'beneficiario', label: 'Beneficiario', default: true, getValue: (r) => (r.tipoBeneficiario === 'Proveedor' ? r.proveedorNombre : r.clienteNombre) },
-      { id: 'documento', label: 'Documento / RUC', default: true, getValue: (r) => (r.tipoBeneficiario === 'Proveedor' ? r.proveedorRuc : r.clienteDocumento) },
+      { id: 'beneficiario', label: 'Beneficiario / Referencia', default: true, getValue: (r) => (r.tipoBeneficiario === 'Otros' ? `${r.proveedorNombre || ''}${r.referenciaPago && r.referenciaPago !== r.proveedorNombre ? ` (${r.referenciaPago})` : ''}` : (r.proveedorNombre || r.clienteNombre || '')) },
+      { id: 'documento', label: 'Documento / RUC', default: true, getValue: (r) => (r.proveedorRuc || r.clienteDocumento || '') },
       { id: 'productoNombre', label: 'Producto / Insumo', default: true, getValue: (r) => r.productoNombre },
       { id: 'cantidad', label: 'Cantidad', default: true, getValue: (r) => r.cantidad },
       { id: 'destino', label: 'Destinado a (Cliente / Pedido)', default: true, getValue: (r) => (r.numeroPedido || r.clienteNombre ? `${r.numeroPedido || ''} - ${r.clienteNombre || ''}`.trim() : 'Compra directa') },

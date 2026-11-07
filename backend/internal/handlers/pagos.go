@@ -32,7 +32,8 @@ func (h *PagosHandler) ensureSchema() {
 		numero_pago VARCHAR(50) NOT NULL UNIQUE,
 		pedido_id INT NULL DEFAULT NULL,
 		pedido_proveedor_id INT NULL DEFAULT NULL,
-		tipo_beneficiario ENUM('Proveedor', 'Cliente') NOT NULL DEFAULT 'Proveedor',
+		tipo_beneficiario VARCHAR(50) NOT NULL DEFAULT 'Proveedor',
+		referencia_pago VARCHAR(255) NULL DEFAULT NULL,
 		proveedor_id INT NULL DEFAULT NULL,
 		proveedor_nombre VARCHAR(200) NOT NULL,
 		proveedor_ruc VARCHAR(50) NULL DEFAULT NULL,
@@ -53,6 +54,7 @@ func (h *PagosHandler) ensureSchema() {
 		fecha_pago DATE NOT NULL,
 		semana_iso INT NOT NULL,
 		anio_iso INT NOT NULL,
+		historial_parciales LONGTEXT NULL DEFAULT NULL,
 		notas TEXT NULL,
 		created_by VARCHAR(150) NULL DEFAULT NULL,
 		deleted_at DATETIME NULL DEFAULT NULL,
@@ -71,6 +73,11 @@ func (h *PagosHandler) ensureSchema() {
 	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;`
 
 	_, _ = h.DB.Exec(q)
+
+	// Ampliar tipo_beneficiario para soportar Proveedor, Colaborador, Otros (y Cliente histórico)
+	_, _ = h.DB.Exec("ALTER TABLE pagos MODIFY COLUMN tipo_beneficiario VARCHAR(50) NOT NULL DEFAULT 'Proveedor'")
+	_, _ = h.DB.Exec("ALTER TABLE pagos ADD COLUMN referencia_pago VARCHAR(255) NULL DEFAULT NULL AFTER tipo_beneficiario")
+	_, _ = h.DB.Exec("ALTER TABLE pagos ADD COLUMN historial_parciales LONGTEXT NULL DEFAULT NULL AFTER anio_iso")
 
 	// Columnas para pedido_proveedores
 	_, _ = h.DB.Exec("ALTER TABLE pedido_proveedores ADD COLUMN producto_id INT NULL DEFAULT NULL AFTER nombre_proveedor")
@@ -208,12 +215,13 @@ func (h *PagosHandler) List(w http.ResponseWriter, r *http.Request) {
 		whereClauses = append(whereClauses, `(
 			p.numero_pago LIKE ? OR
 			p.proveedor_nombre LIKE ? OR
+			COALESCE(p.referencia_pago, '') LIKE ? OR
 			COALESCE(p.proveedor_ruc, '') LIKE ? OR
 			COALESCE(p.cliente_nombre, '') LIKE ? OR
 			p.producto_nombre LIKE ? OR
 			COALESCE(ped.numero_pedido, '') LIKE ?
 		)`)
-		args = append(args, sPattern, sPattern, sPattern, sPattern, sPattern, sPattern)
+		args = append(args, sPattern, sPattern, sPattern, sPattern, sPattern, sPattern, sPattern)
 	}
 
 	whereSQL := strings.Join(whereClauses, " AND ")
@@ -237,14 +245,14 @@ func (h *PagosHandler) List(w http.ResponseWriter, r *http.Request) {
 	dataQuery := fmt.Sprintf(`
 		SELECT
 			p.id, p.numero_pago, p.pedido_id, COALESCE(ped.numero_pedido, ''),
-			p.pedido_proveedor_id, p.tipo_beneficiario,
+			p.pedido_proveedor_id, p.tipo_beneficiario, COALESCE(p.referencia_pago, ''),
 			p.proveedor_id, p.proveedor_nombre, COALESCE(p.proveedor_ruc, ''), p.es_proveedor_temporal,
 			p.cliente_id, COALESCE(p.cliente_nombre, ''), COALESCE(p.cliente_documento, ''), COALESCE(p.cliente_telefono, ''),
 			p.producto_id, p.producto_nombre, p.es_producto_temporal,
 			p.cantidad, p.monto_total, p.monto_pagado, p.saldo_pendiente,
 			p.estado_pago, p.metodo_pago,
 			DATE_FORMAT(p.fecha_pago, '%%Y-%%m-%%d'),
-			p.semana_iso, p.anio_iso, COALESCE(p.notas, ''),
+			p.semana_iso, p.anio_iso, COALESCE(p.historial_parciales, '[]'), COALESCE(p.notas, ''),
 			p.created_by, p.created_at, p.updated_at
 		FROM pagos p
 		LEFT JOIN pedidos ped ON p.pedido_id = ped.id
@@ -266,21 +274,38 @@ func (h *PagosHandler) List(w http.ResponseWriter, r *http.Request) {
 		var item models.Pago
 		var pedID, provID, cliID, prodID, pedProvID sql.NullInt64
 		var createdBy sql.NullString
+		var histJSON string
 
 		err := rows.Scan(
 			&item.ID, &item.NumeroPago, &pedID, &item.NumeroPedido,
-			&pedProvID, &item.TipoBeneficiario,
+			&pedProvID, &item.TipoBeneficiario, &item.ReferenciaPago,
 			&provID, &item.ProveedorNombre, &item.ProveedorRUC, &item.EsProveedorTemporal,
 			&cliID, &item.ClienteNombre, &item.ClienteDocumento, &item.ClienteTelefono,
 			&prodID, &item.ProductoNombre, &item.EsProductoTemporal,
 			&item.Cantidad, &item.MontoTotal, &item.MontoPagado, &item.SaldoPendiente,
 			&item.EstadoPago, &item.MetodoPago,
 			&item.FechaPago,
-			&item.SemanaISO, &item.AnioISO, &item.Notas,
+			&item.SemanaISO, &item.AnioISO, &histJSON, &item.Notas,
 			&createdBy, &item.CreatedAt, &item.UpdatedAt,
 		)
 		if err != nil {
 			continue
+		}
+
+		item.HistorialParciales = make([]models.PagoParcialItem, 0)
+		if strings.TrimSpace(histJSON) != "" {
+			_ = json.Unmarshal([]byte(histJSON), &item.HistorialParciales)
+		}
+		if len(item.HistorialParciales) == 0 && item.EstadoPago == "Pago Parcial" && item.MontoPagado > 0 {
+			item.HistorialParciales = []models.PagoParcialItem{
+				{
+					Monto:      item.MontoPagado,
+					FechaPago:  item.FechaPago,
+					SemanaISO:  item.SemanaISO,
+					AnioISO:    item.AnioISO,
+					MetodoPago: item.MetodoPago,
+				},
+			}
 		}
 
 		if pedID.Valid {
@@ -393,14 +418,14 @@ func (h *PagosHandler) GetByID(w http.ResponseWriter, r *http.Request, id int) {
 	query := `
 		SELECT
 			p.id, p.numero_pago, p.pedido_id, COALESCE(ped.numero_pedido, ''),
-			p.pedido_proveedor_id, p.tipo_beneficiario,
+			p.pedido_proveedor_id, p.tipo_beneficiario, COALESCE(p.referencia_pago, ''),
 			p.proveedor_id, p.proveedor_nombre, COALESCE(p.proveedor_ruc, ''), p.es_proveedor_temporal,
 			p.cliente_id, COALESCE(p.cliente_nombre, ''), COALESCE(p.cliente_documento, ''), COALESCE(p.cliente_telefono, ''),
 			p.producto_id, p.producto_nombre, p.es_producto_temporal,
 			p.cantidad, p.monto_total, p.monto_pagado, p.saldo_pendiente,
 			p.estado_pago, p.metodo_pago,
 			DATE_FORMAT(p.fecha_pago, '%Y-%m-%d'),
-			p.semana_iso, p.anio_iso, COALESCE(p.notas, ''),
+			p.semana_iso, p.anio_iso, COALESCE(p.historial_parciales, '[]'), COALESCE(p.notas, ''),
 			p.created_by, p.created_at, p.updated_at
 		FROM pagos p
 		LEFT JOIN pedidos ped ON p.pedido_id = ped.id
@@ -410,17 +435,18 @@ func (h *PagosHandler) GetByID(w http.ResponseWriter, r *http.Request, id int) {
 	var item models.Pago
 	var pedID, provID, cliID, prodID, pedProvID sql.NullInt64
 	var createdBy sql.NullString
+	var histJSON string
 
 	err := h.DB.QueryRowContext(r.Context(), query, id).Scan(
 		&item.ID, &item.NumeroPago, &pedID, &item.NumeroPedido,
-		&pedProvID, &item.TipoBeneficiario,
+		&pedProvID, &item.TipoBeneficiario, &item.ReferenciaPago,
 		&provID, &item.ProveedorNombre, &item.ProveedorRUC, &item.EsProveedorTemporal,
 		&cliID, &item.ClienteNombre, &item.ClienteDocumento, &item.ClienteTelefono,
 		&prodID, &item.ProductoNombre, &item.EsProductoTemporal,
 		&item.Cantidad, &item.MontoTotal, &item.MontoPagado, &item.SaldoPendiente,
 		&item.EstadoPago, &item.MetodoPago,
 		&item.FechaPago,
-		&item.SemanaISO, &item.AnioISO, &item.Notas,
+		&item.SemanaISO, &item.AnioISO, &histJSON, &item.Notas,
 		&createdBy, &item.CreatedAt, &item.UpdatedAt,
 	)
 	if err == sql.ErrNoRows {
@@ -429,6 +455,22 @@ func (h *PagosHandler) GetByID(w http.ResponseWriter, r *http.Request, id int) {
 	} else if err != nil {
 		auth.WriteJSONError(w, http.StatusInternalServerError, "error al consultar pago: "+err.Error())
 		return
+	}
+
+	item.HistorialParciales = make([]models.PagoParcialItem, 0)
+	if strings.TrimSpace(histJSON) != "" {
+		_ = json.Unmarshal([]byte(histJSON), &item.HistorialParciales)
+	}
+	if len(item.HistorialParciales) == 0 && item.EstadoPago == "Pago Parcial" && item.MontoPagado > 0 {
+		item.HistorialParciales = []models.PagoParcialItem{
+			{
+				Monto:      item.MontoPagado,
+				FechaPago:  item.FechaPago,
+				SemanaISO:  item.SemanaISO,
+				AnioISO:    item.AnioISO,
+				MetodoPago: item.MetodoPago,
+			},
+		}
 	}
 
 	if pedID.Valid {
@@ -460,27 +502,74 @@ func (h *PagosHandler) GetByID(w http.ResponseWriter, r *http.Request, id int) {
 }
 
 type CreatePagoRequest struct {
-	TipoBeneficiario    string  `json:"tipoBeneficiario"`
-	ProveedorID         *int    `json:"proveedorId"`
-	ProveedorNombre     string  `json:"proveedorNombre"`
-	ProveedorRUC        string  `json:"proveedorRuc"`
-	EsProveedorTemporal bool    `json:"esProveedorTemporal"`
-	ClienteID           *int    `json:"clienteId"`
-	ClienteNombre       string  `json:"clienteNombre"`
-	ClienteDocumento    string  `json:"clienteDocumento"`
-	ClienteTelefono     string  `json:"clienteTelefono"`
-	ProductoID          *int    `json:"productoId"`
-	ProductoNombre      string  `json:"productoNombre"`
-	EsProductoTemporal  bool    `json:"esProductoTemporal"`
-	Cantidad            float64 `json:"cantidad"`
-	MontoTotal          float64 `json:"montoTotal"`
-	MontoPagado         float64 `json:"montoPagado"`
-	SaldoPendiente      float64 `json:"saldoPendiente"`
-	EstadoPago          string  `json:"estadoPago"`
-	MetodoPago          string  `json:"metodoPago"`
-	FechaPago           string  `json:"fechaPago"`
-	PedidoID            *int    `json:"pedidoId"`
-	Notas               string  `json:"notas"`
+	TipoBeneficiario    string                   `json:"tipoBeneficiario"`
+	ReferenciaPago      string                   `json:"referenciaPago"`
+	ProveedorID         *int                     `json:"proveedorId"`
+	ProveedorNombre     string                   `json:"proveedorNombre"`
+	ProveedorRUC        string                   `json:"proveedorRuc"`
+	EsProveedorTemporal bool                     `json:"esProveedorTemporal"`
+	ClienteID           *int                     `json:"clienteId"`
+	ClienteNombre       string                   `json:"clienteNombre"`
+	ClienteDocumento    string                   `json:"clienteDocumento"`
+	ClienteTelefono     string                   `json:"clienteTelefono"`
+	ProductoID          *int                     `json:"productoId"`
+	ProductoNombre      string                   `json:"productoNombre"`
+	EsProductoTemporal  bool                     `json:"esProductoTemporal"`
+	Cantidad            float64                  `json:"cantidad"`
+	MontoTotal          float64                  `json:"montoTotal"`
+	MontoPagado         float64                  `json:"montoPagado"`
+	SaldoPendiente      float64                  `json:"saldoPendiente"`
+	EstadoPago          string                   `json:"estadoPago"`
+	MetodoPago          string                   `json:"metodoPago"`
+	FechaPago           string                   `json:"fechaPago"`
+	FechaPagoParcial    string                   `json:"fechaPagoParcial"`
+	HistorialParciales  []models.PagoParcialItem `json:"historialParciales"`
+	PedidoID            *int                     `json:"pedidoId"`
+	Notas               string                   `json:"notas"`
+}
+
+func normalizeBeneficiarioTipo(raw string) string {
+	switch strings.TrimSpace(raw) {
+	case "Colaborador":
+		return "Colaborador"
+	case "Otros":
+		return "Otros"
+	case "Cliente":
+		return "Cliente"
+	default:
+		return "Proveedor"
+	}
+}
+
+func normalizeHistorialParciales(items []models.PagoParcialItem, fallbackDate time.Time, fallbackMetodo string) ([]models.PagoParcialItem, time.Time) {
+	cleaned := make([]models.PagoParcialItem, 0, len(items))
+	latestDate := fallbackDate
+	for _, it := range items {
+		if it.Monto <= 0 {
+			continue
+		}
+		d := fallbackDate
+		if strings.TrimSpace(it.FechaPago) != "" {
+			if parsed, err := time.Parse("2006-01-02", strings.TrimSpace(it.FechaPago)); err == nil {
+				d = parsed
+			}
+		}
+		anio, sem := d.ISOWeek()
+		met := strings.TrimSpace(it.MetodoPago)
+		if met == "" {
+			met = fallbackMetodo
+		}
+		cleaned = append(cleaned, models.PagoParcialItem{
+			Monto:      it.Monto,
+			FechaPago:  d.Format("2006-01-02"),
+			SemanaISO:  sem,
+			AnioISO:    anio,
+			MetodoPago: met,
+			Notas:      strings.TrimSpace(it.Notas),
+		})
+		latestDate = d
+	}
+	return cleaned, latestDate
 }
 
 // Create crea un nuevo pago manual
@@ -496,25 +585,55 @@ func (h *PagosHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tipoBen := strings.TrimSpace(req.TipoBeneficiario)
-	if tipoBen != "Cliente" {
-		tipoBen = "Proveedor"
-	}
-
+	tipoBen := normalizeBeneficiarioTipo(req.TipoBeneficiario)
+	refPago := strings.TrimSpace(req.ReferenciaPago)
 	provNom := strings.TrimSpace(req.ProveedorNombre)
 	cliNom := strings.TrimSpace(req.ClienteNombre)
-	if tipoBen == "Proveedor" && provNom == "" {
-		auth.WriteJSONError(w, http.StatusBadRequest, "el nombre del proveedor es obligatorio")
-		return
-	}
-	if tipoBen == "Cliente" && cliNom == "" {
-		auth.WriteJSONError(w, http.StatusBadRequest, "el nombre del cliente es obligatorio")
-		return
+
+	switch tipoBen {
+	case "Proveedor":
+		if provNom == "" {
+			auth.WriteJSONError(w, http.StatusBadRequest, "el nombre del proveedor es obligatorio")
+			return
+		}
+	case "Colaborador":
+		if provNom == "" && cliNom != "" {
+			provNom = cliNom
+		}
+		if provNom == "" {
+			auth.WriteJSONError(w, http.StatusBadRequest, "el nombre del colaborador es obligatorio")
+			return
+		}
+	case "Otros":
+		if refPago == "" && provNom != "" {
+			refPago = provNom
+		}
+		if refPago == "" {
+			auth.WriteJSONError(w, http.StatusBadRequest, "debe indicar a qué hace referencia el pago (Otros)")
+			return
+		}
+		if provNom == "" {
+			provNom = refPago
+		}
+	case "Cliente":
+		if cliNom == "" && provNom != "" {
+			cliNom = provNom
+		}
+		if cliNom == "" {
+			auth.WriteJSONError(w, http.StatusBadRequest, "el nombre del cliente es obligatorio")
+			return
+		}
+		if provNom == "" {
+			provNom = cliNom
+		}
 	}
 
 	prodNom := strings.TrimSpace(req.ProductoNombre)
+	if prodNom == "" && refPago != "" {
+		prodNom = refPago
+	}
 	if prodNom == "" {
-		auth.WriteJSONError(w, http.StatusBadRequest, "el nombre del producto es obligatorio")
+		auth.WriteJSONError(w, http.StatusBadRequest, "el nombre del producto o concepto es obligatorio")
 		return
 	}
 
@@ -533,16 +652,45 @@ func (h *PagosHandler) Create(w http.ResponseWriter, r *http.Request) {
 		estado = "Pendiente"
 	}
 
+	metodo := strings.TrimSpace(req.MetodoPago)
+	if metodo == "" {
+		metodo = "Efectivo"
+	}
+
+	fechaPago := time.Now()
+	rawFecha := strings.TrimSpace(req.FechaPago)
+	if estado == "Pago Parcial" && strings.TrimSpace(req.FechaPagoParcial) != "" {
+		rawFecha = strings.TrimSpace(req.FechaPagoParcial)
+	}
+	if rawFecha != "" {
+		if t, err := time.Parse("2006-01-02", rawFecha); err == nil {
+			fechaPago = t
+		}
+	}
+
 	var montoPagado, saldoPendiente float64
+	var histItems []models.PagoParcialItem
+
 	switch estado {
 	case "Pagado":
 		montoPagado = total
 		saldoPendiente = 0
+		if len(req.HistorialParciales) > 0 {
+			histItems, _ = normalizeHistorialParciales(req.HistorialParciales, fechaPago, metodo)
+		}
 	case "Pendiente":
 		montoPagado = 0
 		saldoPendiente = total
 	case "Pago Parcial":
+		if len(req.HistorialParciales) > 0 {
+			histItems, fechaPago = normalizeHistorialParciales(req.HistorialParciales, fechaPago, metodo)
+		}
 		montoPagado = req.MontoPagado
+		if montoPagado <= 0 && len(histItems) > 0 {
+			for _, it := range histItems {
+				montoPagado += it.Monto
+			}
+		}
 		if montoPagado < 0 {
 			montoPagado = 0
 		}
@@ -550,21 +698,27 @@ func (h *PagosHandler) Create(w http.ResponseWriter, r *http.Request) {
 			montoPagado = total
 		}
 		saldoPendiente = total - montoPagado
-	}
 
-	metodo := strings.TrimSpace(req.MetodoPago)
-	if metodo == "" {
-		metodo = "Efectivo"
-	}
-
-	fechaPago := time.Now()
-	if strings.TrimSpace(req.FechaPago) != "" {
-		if t, err := time.Parse("2006-01-02", strings.TrimSpace(req.FechaPago)); err == nil {
-			fechaPago = t
+		if len(histItems) == 0 && montoPagado > 0 {
+			aISO, sISO := fechaPago.ISOWeek()
+			histItems = []models.PagoParcialItem{
+				{
+					Monto:      montoPagado,
+					FechaPago:  fechaPago.Format("2006-01-02"),
+					SemanaISO:  sISO,
+					AnioISO:    aISO,
+					MetodoPago: metodo,
+					Notas:      strings.TrimSpace(req.Notas),
+				},
+			}
 		}
 	}
+
 	anioISO, semanaISO := fechaPago.ISOWeek()
 	fechaPagoStr := fechaPago.Format("2006-01-02")
+
+	histBytes, _ := json.Marshal(histItems)
+	histJSON := string(histBytes)
 
 	actor := h.getActorName(r)
 
@@ -575,24 +729,24 @@ func (h *PagosHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	insertSQL := `
 		INSERT INTO pagos (
-			numero_pago, pedido_id, tipo_beneficiario,
+			numero_pago, pedido_id, tipo_beneficiario, referencia_pago,
 			proveedor_id, proveedor_nombre, proveedor_ruc, es_proveedor_temporal,
 			cliente_id, cliente_nombre, cliente_documento, cliente_telefono,
 			producto_id, producto_nombre, es_producto_temporal,
 			cantidad, monto_total, monto_pagado, saldo_pendiente,
 			estado_pago, metodo_pago, fecha_pago, semana_iso, anio_iso,
-			notas, created_by
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			historial_parciales, notas, created_by
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 
 	res, err := h.DB.ExecContext(r.Context(), insertSQL,
-		numeroPago, req.PedidoID, tipoBen,
+		numeroPago, req.PedidoID, tipoBen, refPago,
 		req.ProveedorID, provNom, strings.TrimSpace(req.ProveedorRUC), req.EsProveedorTemporal,
 		req.ClienteID, cliNom, strings.TrimSpace(req.ClienteDocumento), strings.TrimSpace(req.ClienteTelefono),
 		req.ProductoID, prodNom, req.EsProductoTemporal,
 		cant, total, montoPagado, saldoPendiente,
 		estado, metodo, fechaPagoStr, semanaISO, anioISO,
-		strings.TrimSpace(req.Notas), actor,
+		histJSON, strings.TrimSpace(req.Notas), actor,
 	)
 	if err != nil {
 		auth.WriteJSONError(w, http.StatusInternalServerError, "error al registrar pago: "+err.Error())
@@ -607,6 +761,9 @@ func (h *PagosHandler) Create(w http.ResponseWriter, r *http.Request) {
 		"message":    "Pago registrado exitosamente",
 		"id":         newID,
 		"numeroPago": numeroPago,
+		"fechaPago":  fechaPagoStr,
+		"semanaIso":  semanaISO,
+		"anioIso":    anioISO,
 	})
 }
 
@@ -623,25 +780,70 @@ func (h *PagosHandler) Update(w http.ResponseWriter, r *http.Request, id int) {
 		return
 	}
 
-	tipoBen := strings.TrimSpace(req.TipoBeneficiario)
-	if tipoBen != "Cliente" {
-		tipoBen = "Proveedor"
+	var pedProvID sql.NullInt64
+	var oldHistJSON string
+	var oldMontoPagado float64
+	err := h.DB.QueryRowContext(r.Context(),
+		"SELECT pedido_proveedor_id, COALESCE(historial_parciales, '[]'), monto_pagado FROM pagos WHERE id = ? AND deleted_at IS NULL",
+		id,
+	).Scan(&pedProvID, &oldHistJSON, &oldMontoPagado)
+	if err == sql.ErrNoRows {
+		auth.WriteJSONError(w, http.StatusNotFound, "pago no encontrado")
+		return
+	} else if err != nil {
+		auth.WriteJSONError(w, http.StatusInternalServerError, "error al verificar pago: "+err.Error())
+		return
 	}
 
+	tipoBen := normalizeBeneficiarioTipo(req.TipoBeneficiario)
+	refPago := strings.TrimSpace(req.ReferenciaPago)
 	provNom := strings.TrimSpace(req.ProveedorNombre)
 	cliNom := strings.TrimSpace(req.ClienteNombre)
-	if tipoBen == "Proveedor" && provNom == "" {
-		auth.WriteJSONError(w, http.StatusBadRequest, "el nombre del proveedor es obligatorio")
-		return
-	}
-	if tipoBen == "Cliente" && cliNom == "" {
-		auth.WriteJSONError(w, http.StatusBadRequest, "el nombre del cliente es obligatorio")
-		return
+
+	switch tipoBen {
+	case "Proveedor":
+		if provNom == "" {
+			auth.WriteJSONError(w, http.StatusBadRequest, "el nombre del proveedor es obligatorio")
+			return
+		}
+	case "Colaborador":
+		if provNom == "" && cliNom != "" {
+			provNom = cliNom
+		}
+		if provNom == "" {
+			auth.WriteJSONError(w, http.StatusBadRequest, "el nombre del colaborador es obligatorio")
+			return
+		}
+	case "Otros":
+		if refPago == "" && provNom != "" {
+			refPago = provNom
+		}
+		if refPago == "" {
+			auth.WriteJSONError(w, http.StatusBadRequest, "debe indicar a qué hace referencia el pago (Otros)")
+			return
+		}
+		if provNom == "" {
+			provNom = refPago
+		}
+	case "Cliente":
+		if cliNom == "" && provNom != "" {
+			cliNom = provNom
+		}
+		if cliNom == "" {
+			auth.WriteJSONError(w, http.StatusBadRequest, "el nombre del cliente es obligatorio")
+			return
+		}
+		if provNom == "" {
+			provNom = cliNom
+		}
 	}
 
 	prodNom := strings.TrimSpace(req.ProductoNombre)
+	if prodNom == "" && refPago != "" {
+		prodNom = refPago
+	}
 	if prodNom == "" {
-		auth.WriteJSONError(w, http.StatusBadRequest, "el nombre del producto es obligatorio")
+		auth.WriteJSONError(w, http.StatusBadRequest, "el nombre del producto o concepto es obligatorio")
 		return
 	}
 
@@ -660,15 +862,50 @@ func (h *PagosHandler) Update(w http.ResponseWriter, r *http.Request, id int) {
 		estado = "Pendiente"
 	}
 
+	metodo := strings.TrimSpace(req.MetodoPago)
+	if metodo == "" {
+		metodo = "Efectivo"
+	}
+
+	fechaPago := time.Now()
+	rawFecha := strings.TrimSpace(req.FechaPago)
+	if estado == "Pago Parcial" && strings.TrimSpace(req.FechaPagoParcial) != "" {
+		rawFecha = strings.TrimSpace(req.FechaPagoParcial)
+	}
+	if rawFecha != "" {
+		if t, err := time.Parse("2006-01-02", rawFecha); err == nil {
+			fechaPago = t
+		}
+	}
+
+	var existingHist []models.PagoParcialItem
+	if strings.TrimSpace(oldHistJSON) != "" {
+		_ = json.Unmarshal([]byte(oldHistJSON), &existingHist)
+	}
+
 	var montoPagado, saldoPendiente float64
+	var histItems []models.PagoParcialItem
+
 	switch estado {
 	case "Pagado":
 		montoPagado = total
 		saldoPendiente = 0
+		if len(req.HistorialParciales) > 0 {
+			histItems, _ = normalizeHistorialParciales(req.HistorialParciales, fechaPago, metodo)
+		} else {
+			histItems = existingHist
+		}
 	case "Pendiente":
 		montoPagado = 0
 		saldoPendiente = total
+		histItems = make([]models.PagoParcialItem, 0)
 	case "Pago Parcial":
+		if len(req.HistorialParciales) > 0 {
+			// Tomar la fecha y semana del último pago parcial agregado
+			histItems, fechaPago = normalizeHistorialParciales(req.HistorialParciales, fechaPago, metodo)
+		} else {
+			histItems = existingHist
+		}
 		montoPagado = req.MontoPagado
 		if montoPagado < 0 {
 			montoPagado = 0
@@ -677,62 +914,80 @@ func (h *PagosHandler) Update(w http.ResponseWriter, r *http.Request, id int) {
 			montoPagado = total
 		}
 		saldoPendiente = total - montoPagado
-	}
 
-	metodo := strings.TrimSpace(req.MetodoPago)
-	if metodo == "" {
-		metodo = "Efectivo"
-	}
-
-	fechaPago := time.Now()
-	if strings.TrimSpace(req.FechaPago) != "" {
-		if t, err := time.Parse("2006-01-02", strings.TrimSpace(req.FechaPago)); err == nil {
-			fechaPago = t
+		if len(req.HistorialParciales) == 0 && montoPagado > 0 {
+			aISO, sISO := fechaPago.ISOWeek()
+			delta := montoPagado - oldMontoPagado
+			if delta > 0 && len(histItems) > 0 {
+				histItems = append(histItems, models.PagoParcialItem{
+					Monto:      delta,
+					FechaPago:  fechaPago.Format("2006-01-02"),
+					SemanaISO:  sISO,
+					AnioISO:    aISO,
+					MetodoPago: metodo,
+					Notas:      strings.TrimSpace(req.Notas),
+				})
+			} else if len(histItems) == 0 {
+				histItems = []models.PagoParcialItem{
+					{
+						Monto:      montoPagado,
+						FechaPago:  fechaPago.Format("2006-01-02"),
+						SemanaISO:  sISO,
+						AnioISO:    aISO,
+						MetodoPago: metodo,
+						Notas:      strings.TrimSpace(req.Notas),
+					},
+				}
+			}
 		}
 	}
+
 	anioISO, semanaISO := fechaPago.ISOWeek()
 	fechaPagoStr := fechaPago.Format("2006-01-02")
 
+	histBytes, _ := json.Marshal(histItems)
+	histJSON := string(histBytes)
+
 	updateSQL := `
 		UPDATE pagos SET
-			tipo_beneficiario = ?,
+			tipo_beneficiario = ?, referencia_pago = ?,
 			proveedor_id = ?, proveedor_nombre = ?, proveedor_ruc = ?, es_proveedor_temporal = ?,
 			cliente_id = ?, cliente_nombre = ?, cliente_documento = ?, cliente_telefono = ?,
 			producto_id = ?, producto_nombre = ?, es_producto_temporal = ?,
 			cantidad = ?, monto_total = ?, monto_pagado = ?, saldo_pendiente = ?,
 			estado_pago = ?, metodo_pago = ?, fecha_pago = ?, semana_iso = ?, anio_iso = ?,
-			notas = ?
+			historial_parciales = ?, notas = ?
 		WHERE id = ? AND deleted_at IS NULL
 	`
 
-	var exists int
-	err := h.DB.QueryRowContext(r.Context(), "SELECT 1 FROM pagos WHERE id = ? AND deleted_at IS NULL", id).Scan(&exists)
-	if err == sql.ErrNoRows {
-		auth.WriteJSONError(w, http.StatusNotFound, "pago no encontrado")
-		return
-	} else if err != nil {
-		auth.WriteJSONError(w, http.StatusInternalServerError, "error al verificar pago: "+err.Error())
-		return
-	}
-
 	_, err = h.DB.ExecContext(r.Context(), updateSQL,
-		tipoBen,
+		tipoBen, refPago,
 		req.ProveedorID, provNom, strings.TrimSpace(req.ProveedorRUC), req.EsProveedorTemporal,
 		req.ClienteID, cliNom, strings.TrimSpace(req.ClienteDocumento), strings.TrimSpace(req.ClienteTelefono),
 		req.ProductoID, prodNom, req.EsProductoTemporal,
 		cant, total, montoPagado, saldoPendiente,
 		estado, metodo, fechaPagoStr, semanaISO, anioISO,
-		strings.TrimSpace(req.Notas), id,
+		histJSON, strings.TrimSpace(req.Notas), id,
 	)
 	if err != nil {
 		auth.WriteJSONError(w, http.StatusInternalServerError, "error al actualizar pago: "+err.Error())
 		return
 	}
 
+	if pedProvID.Valid && pedProvID.Int64 > 0 {
+		_, _ = h.DB.ExecContext(r.Context(),
+			"UPDATE pedido_proveedores SET estado_pago = ?, monto_pagado = ?, saldo_pendiente = ? WHERE id = ?",
+			estado, montoPagado, saldoPendiente, pedProvID.Int64,
+		)
+	}
+
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	_ = json.NewEncoder(w).Encode(map[string]any{
-		"message": "Pago actualizado exitosamente",
-		"id":      id,
+		"message":   "Pago actualizado exitosamente",
+		"id":        id,
+		"fechaPago": fechaPagoStr,
+		"semanaIso": semanaISO,
+		"anioIso":   anioISO,
 	})
 }
 

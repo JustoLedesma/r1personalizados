@@ -51,8 +51,9 @@ func Connect() (*sql.DB, error) {
 	defer cancel()
 
 	if err := conn.PingContext(ctx); err != nil {
-		_ = conn.Close()
-		return nil, fmt.Errorf("no se pudo conectar a MySQL en %s:%s (base de datos '%s'): %w", host, port, name, err)
+		// Retornar el pool `conn` igualmente para que sql.DB reconecte automáticamente
+		// apenas el contenedor de MySQL/MariaDB esté disponible, sin requerir reiniciar el backend.
+		return conn, fmt.Errorf("no se pudo conectar inicialmente a MySQL en %s:%s (base de datos '%s'): %w", host, port, name, err)
 	}
 
 	return conn, nil

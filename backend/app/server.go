@@ -28,11 +28,13 @@ func Run() {
 
 	var dbConn *sql.DB
 	conn, err := db.Connect()
-	if err != nil {
-		log.Printf("[AVISO BD] %v — El servidor iniciará en modo vista previa hasta que MySQL esté activo", err)
-	} else {
+	if conn != nil {
 		dbConn = conn
 		defer dbConn.Close()
+	}
+	if err != nil {
+		log.Printf("[AVISO BD] %v — El pool de BD reconectará automáticamente cuando MySQL esté activo", err)
+	} else {
 		log.Println("[BD] Conectado exitosamente a MySQL/MariaDB (base de datos: r1personalizados)")
 	}
 
