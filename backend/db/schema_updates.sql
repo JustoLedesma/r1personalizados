@@ -629,6 +629,17 @@ ALTER TABLE `pagos` MODIFY COLUMN `tipo_beneficiario` VARCHAR(50) NOT NULL DEFAU
 ALTER TABLE `pagos` ADD COLUMN `referencia_pago` VARCHAR(255) NULL DEFAULT NULL AFTER `tipo_beneficiario`;
 ALTER TABLE `pagos` ADD COLUMN `historial_parciales` LONGTEXT NULL DEFAULT NULL AFTER `notas`;
 
+-- ============================================================================
+-- MÓDULO PAGOS: OPCIÓN DE PAGO RECURRENTE (DIARIO, SEMANAL, MENSUAL, TRIMESTRAL)
+-- ============================================================================
+ALTER TABLE `pagos` ADD COLUMN `es_recurrente` TINYINT(1) NOT NULL DEFAULT 0 AFTER `historial_parciales`;
+ALTER TABLE `pagos` ADD COLUMN `recurrencia_frecuencia` VARCHAR(30) NULL DEFAULT NULL AFTER `es_recurrente`;
+ALTER TABLE `pagos` ADD COLUMN `recurrencia_tipo_dia` VARCHAR(30) NULL DEFAULT NULL AFTER `recurrencia_frecuencia`;
+ALTER TABLE `pagos` ADD COLUMN `recurrencia_fecha_inicio` DATE NULL DEFAULT NULL AFTER `recurrencia_tipo_dia`;
+ALTER TABLE `pagos` ADD COLUMN `recurrencia_fecha_fin` DATE NULL DEFAULT NULL AFTER `recurrencia_fecha_inicio`;
+ALTER TABLE `pagos` ADD COLUMN `recurrencia_grupo_id` VARCHAR(60) NULL DEFAULT NULL AFTER `recurrencia_fecha_fin`;
+
+
 
 
 

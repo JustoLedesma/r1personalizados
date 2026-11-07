@@ -41,6 +41,12 @@ type Pago struct {
 	AnioISO             int               `json:"anioIso"`
 	HistorialParciales  []PagoParcialItem `json:"historialParciales"`
 	Notas               string            `json:"notas"`
+	EsRecurrente        bool              `json:"esRecurrente"`
+	RecurrenciaFrecuencia string          `json:"recurrenciaFrecuencia,omitempty"`
+	RecurrenciaTipoDia  string            `json:"recurrenciaTipoDia,omitempty"`
+	RecurrenciaFechaInicio string         `json:"recurrenciaFechaInicio,omitempty"`
+	RecurrenciaFechaFin string            `json:"recurrenciaFechaFin,omitempty"`
+	RecurrenciaGrupoID  string            `json:"recurrenciaGrupoId,omitempty"`
 	CreatedBy           *string           `json:"createdBy,omitempty"`
 	DeletedAt           *time.Time        `json:"deletedAt,omitempty"`
 	DeletedBy           *string           `json:"deletedBy,omitempty"`

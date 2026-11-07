@@ -1049,6 +1049,88 @@ func (h *ReciclajeHandler) List(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// 10. Pagos en reciclaje
+	if modulo == "" || modulo == "pagos" || modulo == "pago" {
+		rowsPagos, err := h.DB.QueryContext(r.Context(), `
+			SELECT
+				p.id, p.numero_pago, p.tipo_beneficiario, COALESCE(p.referencia_pago, ''),
+				COALESCE(p.proveedor_nombre, ''), COALESCE(p.cliente_nombre, ''),
+				p.producto_nombre, p.cantidad, p.monto_total, p.monto_pagado, p.saldo_pendiente,
+				p.estado_pago, p.metodo_pago, DATE_FORMAT(p.fecha_pago, '%Y-%m-%d'),
+				p.semana_iso, p.anio_iso, COALESCE(p.notas, ''),
+				p.created_at, p.updated_at, COALESCE(p.deleted_by, 'Operador Ventas'), p.deleted_at
+			FROM pagos p
+			WHERE p.deleted_at IS NOT NULL
+			ORDER BY p.deleted_at DESC
+		`)
+		if err == nil {
+			for rowsPagos.Next() {
+				var (
+					id, semISO, anioISO                           int
+					numPago, tipoBen, refPago, provNom, cliNom   string
+					prodNom, estPago, metodoPago, fechaPago, notas, delBy string
+					cant, montoTotal, montoPagado, saldoPendiente float64
+					created, updated, delAt                       time.Time
+				)
+				if err := rowsPagos.Scan(
+					&id, &numPago, &tipoBen, &refPago,
+					&provNom, &cliNom,
+					&prodNom, &cant, &montoTotal, &montoPagado, &saldoPendiente,
+					&estPago, &metodoPago, &fechaPago,
+					&semISO, &anioISO, &notas,
+					&created, &updated, &delBy, &delAt,
+				); err == nil {
+					beneficiario := provNom
+					if tipoBen == "Otros" {
+						if refPago != "" {
+							beneficiario = fmt.Sprintf("%s (%s)", provNom, refPago)
+						}
+					} else if tipoBen == "Cliente" && cliNom != "" {
+						beneficiario = cliNom
+					}
+					if beneficiario == "" {
+						beneficiario = "No especificado"
+					}
+
+					campos := []RecycleField{
+						{Label: "N° de Pago", Value: numPago},
+						{Label: "Tipo de Beneficiario", Value: tipoBen},
+						{Label: "Beneficiario", Value: beneficiario},
+						{Label: "Producto / Concepto", Value: prodNom},
+						{Label: "Cantidad", Value: fmt.Sprintf("%.0f", cant)},
+						{Label: "Monto Total", Value: fmt.Sprintf("%.0f Gs.", montoTotal)},
+						{Label: "Monto Abonado", Value: fmt.Sprintf("%.0f Gs.", montoPagado)},
+						{Label: "Saldo Pendiente", Value: fmt.Sprintf("%.0f Gs.", saldoPendiente)},
+						{Label: "Estado de Pago", Value: estPago},
+						{Label: "Método de Pago", Value: metodoPago},
+						{Label: "Fecha de Pago", Value: fechaPago},
+						{Label: "Semana ISO", Value: fmt.Sprintf("Semana %d (%d)", semISO, anioISO)},
+					}
+					if strings.TrimSpace(notas) != "" {
+						campos = append(campos, RecycleField{Label: "Notas / Observaciones", Value: notas})
+					}
+
+					item := RecycleItem{
+						ID:            id,
+						Modulo:        "Pagos",
+						Identificador: numPago,
+						Nombre:        fmt.Sprintf("Pago %s - %s", numPago, beneficiario),
+						Detalle:       fmt.Sprintf("Beneficiario: %s · Concepto: %s · Total: %.0f Gs.", beneficiario, prodNom, montoTotal),
+						CreatedAt:     created,
+						UpdatedAt:     updated,
+						DeletedBy:     delBy,
+						DeletedAt:     delAt,
+						Campos:        campos,
+					}
+					if q == "" || matchesRecycleSearch(item, q) {
+						allItems = append(allItems, item)
+					}
+				}
+			}
+			rowsPagos.Close()
+		}
+	}
+
 	sort.Slice(allItems, func(i, j int) bool {
 		return allItems[i].DeletedAt.After(allItems[j].DeletedAt)
 	})
@@ -1160,6 +1242,12 @@ func (h *ReciclajeHandler) Restore(w http.ResponseWriter, r *http.Request) {
 		_, err := h.DB.ExecContext(r.Context(), "UPDATE presupuestos SET deleted_at = NULL, deleted_by = NULL WHERE id = ?", req.ID)
 		if err != nil {
 			auth.WriteJSONError(w, http.StatusInternalServerError, "no se pudo restaurar el presupuesto")
+			return
+		}
+	case "pagos", "pago":
+		_, err := h.DB.ExecContext(r.Context(), "UPDATE pagos SET deleted_at = NULL, deleted_by = NULL WHERE id = ?", req.ID)
+		if err != nil {
+			auth.WriteJSONError(w, http.StatusInternalServerError, "no se pudo restaurar el pago")
 			return
 		}
 	default:

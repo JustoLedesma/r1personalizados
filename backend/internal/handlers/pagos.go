@@ -78,6 +78,12 @@ func (h *PagosHandler) ensureSchema() {
 	_, _ = h.DB.Exec("ALTER TABLE pagos MODIFY COLUMN tipo_beneficiario VARCHAR(50) NOT NULL DEFAULT 'Proveedor'")
 	_, _ = h.DB.Exec("ALTER TABLE pagos ADD COLUMN referencia_pago VARCHAR(255) NULL DEFAULT NULL AFTER tipo_beneficiario")
 	_, _ = h.DB.Exec("ALTER TABLE pagos ADD COLUMN historial_parciales LONGTEXT NULL DEFAULT NULL AFTER anio_iso")
+	_, _ = h.DB.Exec("ALTER TABLE pagos ADD COLUMN es_recurrente TINYINT(1) NOT NULL DEFAULT 0 AFTER historial_parciales")
+	_, _ = h.DB.Exec("ALTER TABLE pagos ADD COLUMN recurrencia_frecuencia VARCHAR(30) NULL DEFAULT NULL AFTER es_recurrente")
+	_, _ = h.DB.Exec("ALTER TABLE pagos ADD COLUMN recurrencia_tipo_dia VARCHAR(30) NULL DEFAULT NULL AFTER recurrencia_frecuencia")
+	_, _ = h.DB.Exec("ALTER TABLE pagos ADD COLUMN recurrencia_fecha_inicio DATE NULL DEFAULT NULL AFTER recurrencia_tipo_dia")
+	_, _ = h.DB.Exec("ALTER TABLE pagos ADD COLUMN recurrencia_fecha_fin DATE NULL DEFAULT NULL AFTER recurrencia_fecha_inicio")
+	_, _ = h.DB.Exec("ALTER TABLE pagos ADD COLUMN recurrencia_grupo_id VARCHAR(60) NULL DEFAULT NULL AFTER recurrencia_fecha_fin")
 
 	// Columnas para pedido_proveedores
 	_, _ = h.DB.Exec("ALTER TABLE pedido_proveedores ADD COLUMN producto_id INT NULL DEFAULT NULL AFTER nombre_proveedor")
@@ -219,9 +225,11 @@ func (h *PagosHandler) List(w http.ResponseWriter, r *http.Request) {
 			COALESCE(p.proveedor_ruc, '') LIKE ? OR
 			COALESCE(p.cliente_nombre, '') LIKE ? OR
 			p.producto_nombre LIKE ? OR
-			COALESCE(ped.numero_pedido, '') LIKE ?
+			COALESCE(ped.numero_pedido, '') LIKE ? OR
+			COALESCE(p.recurrencia_frecuencia, '') LIKE ? OR
+			COALESCE(p.recurrencia_grupo_id, '') LIKE ?
 		)`)
-		args = append(args, sPattern, sPattern, sPattern, sPattern, sPattern, sPattern, sPattern)
+		args = append(args, sPattern, sPattern, sPattern, sPattern, sPattern, sPattern, sPattern, sPattern, sPattern)
 	}
 
 	whereSQL := strings.Join(whereClauses, " AND ")
@@ -251,8 +259,12 @@ func (h *PagosHandler) List(w http.ResponseWriter, r *http.Request) {
 			p.producto_id, p.producto_nombre, p.es_producto_temporal,
 			p.cantidad, p.monto_total, p.monto_pagado, p.saldo_pendiente,
 			p.estado_pago, p.metodo_pago,
-			DATE_FORMAT(p.fecha_pago, '%%Y-%%m-%%d'),
+			DATE_FORMAT(p.fecha_pago, '%%%%Y-%%%%m-%%%%d'),
 			p.semana_iso, p.anio_iso, COALESCE(p.historial_parciales, '[]'), COALESCE(p.notas, ''),
+			COALESCE(p.es_recurrente, 0), COALESCE(p.recurrencia_frecuencia, ''), COALESCE(p.recurrencia_tipo_dia, ''),
+			COALESCE(DATE_FORMAT(p.recurrencia_fecha_inicio, '%%%%Y-%%%%m-%%%%d'), ''),
+			COALESCE(DATE_FORMAT(p.recurrencia_fecha_fin, '%%%%Y-%%%%m-%%%%d'), ''),
+			COALESCE(p.recurrencia_grupo_id, ''),
 			p.created_by, p.created_at, p.updated_at
 		FROM pagos p
 		LEFT JOIN pedidos ped ON p.pedido_id = ped.id
@@ -286,6 +298,8 @@ func (h *PagosHandler) List(w http.ResponseWriter, r *http.Request) {
 			&item.EstadoPago, &item.MetodoPago,
 			&item.FechaPago,
 			&item.SemanaISO, &item.AnioISO, &histJSON, &item.Notas,
+			&item.EsRecurrente, &item.RecurrenciaFrecuencia, &item.RecurrenciaTipoDia,
+			&item.RecurrenciaFechaInicio, &item.RecurrenciaFechaFin, &item.RecurrenciaGrupoID,
 			&createdBy, &item.CreatedAt, &item.UpdatedAt,
 		)
 		if err != nil {
@@ -426,6 +440,10 @@ func (h *PagosHandler) GetByID(w http.ResponseWriter, r *http.Request, id int) {
 			p.estado_pago, p.metodo_pago,
 			DATE_FORMAT(p.fecha_pago, '%Y-%m-%d'),
 			p.semana_iso, p.anio_iso, COALESCE(p.historial_parciales, '[]'), COALESCE(p.notas, ''),
+			COALESCE(p.es_recurrente, 0), COALESCE(p.recurrencia_frecuencia, ''), COALESCE(p.recurrencia_tipo_dia, ''),
+			COALESCE(DATE_FORMAT(p.recurrencia_fecha_inicio, '%Y-%m-%d'), ''),
+			COALESCE(DATE_FORMAT(p.recurrencia_fecha_fin, '%Y-%m-%d'), ''),
+			COALESCE(p.recurrencia_grupo_id, ''),
 			p.created_by, p.created_at, p.updated_at
 		FROM pagos p
 		LEFT JOIN pedidos ped ON p.pedido_id = ped.id
@@ -447,6 +465,8 @@ func (h *PagosHandler) GetByID(w http.ResponseWriter, r *http.Request, id int) {
 		&item.EstadoPago, &item.MetodoPago,
 		&item.FechaPago,
 		&item.SemanaISO, &item.AnioISO, &histJSON, &item.Notas,
+		&item.EsRecurrente, &item.RecurrenciaFrecuencia, &item.RecurrenciaTipoDia,
+		&item.RecurrenciaFechaInicio, &item.RecurrenciaFechaFin, &item.RecurrenciaGrupoID,
 		&createdBy, &item.CreatedAt, &item.UpdatedAt,
 	)
 	if err == sql.ErrNoRows {
@@ -502,30 +522,148 @@ func (h *PagosHandler) GetByID(w http.ResponseWriter, r *http.Request, id int) {
 }
 
 type CreatePagoRequest struct {
-	TipoBeneficiario    string                   `json:"tipoBeneficiario"`
-	ReferenciaPago      string                   `json:"referenciaPago"`
-	ProveedorID         *int                     `json:"proveedorId"`
-	ProveedorNombre     string                   `json:"proveedorNombre"`
-	ProveedorRUC        string                   `json:"proveedorRuc"`
-	EsProveedorTemporal bool                     `json:"esProveedorTemporal"`
-	ClienteID           *int                     `json:"clienteId"`
-	ClienteNombre       string                   `json:"clienteNombre"`
-	ClienteDocumento    string                   `json:"clienteDocumento"`
-	ClienteTelefono     string                   `json:"clienteTelefono"`
-	ProductoID          *int                     `json:"productoId"`
-	ProductoNombre      string                   `json:"productoNombre"`
-	EsProductoTemporal  bool                     `json:"esProductoTemporal"`
-	Cantidad            float64                  `json:"cantidad"`
-	MontoTotal          float64                  `json:"montoTotal"`
-	MontoPagado         float64                  `json:"montoPagado"`
-	SaldoPendiente      float64                  `json:"saldoPendiente"`
-	EstadoPago          string                   `json:"estadoPago"`
-	MetodoPago          string                   `json:"metodoPago"`
-	FechaPago           string                   `json:"fechaPago"`
-	FechaPagoParcial    string                   `json:"fechaPagoParcial"`
-	HistorialParciales  []models.PagoParcialItem `json:"historialParciales"`
-	PedidoID            *int                     `json:"pedidoId"`
-	Notas               string                   `json:"notas"`
+	TipoBeneficiario       string                   `json:"tipoBeneficiario"`
+	ReferenciaPago         string                   `json:"referenciaPago"`
+	ProveedorID            *int                     `json:"proveedorId"`
+	ProveedorNombre        string                   `json:"proveedorNombre"`
+	ProveedorRUC           string                   `json:"proveedorRuc"`
+	EsProveedorTemporal    bool                     `json:"esProveedorTemporal"`
+	ClienteID              *int                     `json:"clienteId"`
+	ClienteNombre          string                   `json:"clienteNombre"`
+	ClienteDocumento       string                   `json:"clienteDocumento"`
+	ClienteTelefono        string                   `json:"clienteTelefono"`
+	ProductoID             *int                     `json:"productoId"`
+	ProductoNombre         string                   `json:"productoNombre"`
+	EsProductoTemporal     bool                     `json:"esProductoTemporal"`
+	Cantidad               float64                  `json:"cantidad"`
+	MontoTotal             float64                  `json:"montoTotal"`
+	MontoPagado            float64                  `json:"montoPagado"`
+	SaldoPendiente         float64                  `json:"saldoPendiente"`
+	EstadoPago             string                   `json:"estadoPago"`
+	MetodoPago             string                   `json:"metodoPago"`
+	FechaPago              string                   `json:"fechaPago"`
+	FechaPagoParcial       string                   `json:"fechaPagoParcial"`
+	HistorialParciales     []models.PagoParcialItem `json:"historialParciales"`
+	PedidoID               *int                     `json:"pedidoId"`
+	Notas                  string                   `json:"notas"`
+	EsRecurrente           bool                     `json:"esRecurrente"`
+	RecurrenciaFrecuencia  string                   `json:"recurrenciaFrecuencia"`
+	RecurrenciaTipoDia     string                   `json:"recurrenciaTipoDia"`
+	RecurrenciaFechaInicio string                   `json:"recurrenciaFechaInicio"`
+	RecurrenciaFechaFin    string                   `json:"recurrenciaFechaFin"`
+	RecurrenciaGrupoID     string                   `json:"recurrenciaGrupoId"`
+}
+
+type RecurringPaymentDate struct {
+	Fecha     time.Time
+	SemanaISO int
+	AnioISO   int
+}
+
+func generateRecurringDates(frecuencia, tipoDia string, fechaInicio, fechaFin time.Time) ([]RecurringPaymentDate, error) {
+	if fechaFin.Before(fechaInicio) {
+		return nil, fmt.Errorf("la fecha fin no puede ser anterior a la fecha de inicio")
+	}
+
+	var dates []RecurringPaymentDate
+
+	switch strings.ToLower(strings.TrimSpace(frecuencia)) {
+	case "diario":
+		cur := fechaInicio
+		for !cur.After(fechaFin) {
+			anio, sem := cur.ISOWeek()
+			dates = append(dates, RecurringPaymentDate{Fecha: cur, SemanaISO: sem, AnioISO: anio})
+			cur = cur.AddDate(0, 0, 1)
+			if len(dates) > 366 {
+				return nil, fmt.Errorf("el rango supera el límite máximo de 366 días para pagos diarios")
+			}
+		}
+
+	case "semanal":
+		// Iniciar lunes automáticamente según requisito del usuario
+		weekday := int(fechaInicio.Weekday())
+		offset := weekday - 1
+		if offset < 0 { // Domingo
+			offset = 6
+		}
+		monday := fechaInicio.AddDate(0, 0, -offset)
+		cur := monday
+		for !cur.After(fechaFin) {
+			if !cur.Before(monday) {
+				anio, sem := cur.ISOWeek()
+				dates = append(dates, RecurringPaymentDate{Fecha: cur, SemanaISO: sem, AnioISO: anio})
+			}
+			cur = cur.AddDate(0, 0, 7)
+			if len(dates) > 156 {
+				return nil, fmt.Errorf("el rango supera el límite máximo de 156 semanas")
+			}
+		}
+
+	case "mensual":
+		startYear, startMonth, _ := fechaInicio.Date()
+		endYear, endMonth, _ := fechaFin.Date()
+		totalMonths := (endYear-startYear)*12 + int(endMonth-startMonth)
+		if totalMonths < 0 {
+			totalMonths = 0
+		}
+
+		for i := 0; i <= totalMonths; i++ {
+			baseMonth := time.Date(startYear, startMonth+time.Month(i), 1, 0, 0, 0, 0, time.Local)
+			var targetDate time.Time
+
+			if tipoDia == "cierre_mes" {
+				targetDate = time.Date(baseMonth.Year(), baseMonth.Month()+1, 0, 0, 0, 0, 0, time.Local)
+			} else {
+				targetDate = time.Date(baseMonth.Year(), baseMonth.Month(), 1, 0, 0, 0, 0, time.Local)
+			}
+
+			if !targetDate.Before(fechaInicio) && !targetDate.After(fechaFin) {
+				anio, sem := targetDate.ISOWeek()
+				dates = append(dates, RecurringPaymentDate{Fecha: targetDate, SemanaISO: sem, AnioISO: anio})
+			}
+
+			if len(dates) > 60 {
+				return nil, fmt.Errorf("el rango supera el límite máximo de 60 meses")
+			}
+		}
+
+	case "trimestral":
+		startYear, startMonth, _ := fechaInicio.Date()
+		endYear, endMonth, _ := fechaFin.Date()
+		totalMonths := (endYear-startYear)*12 + int(endMonth-startMonth)
+		if totalMonths < 0 {
+			totalMonths = 0
+		}
+
+		for i := 0; i <= totalMonths; i += 3 {
+			baseMonth := time.Date(startYear, startMonth+time.Month(i), 1, 0, 0, 0, 0, time.Local)
+			var targetDate time.Time
+
+			if tipoDia == "cierre_mes" {
+				targetDate = time.Date(baseMonth.Year(), baseMonth.Month()+1, 0, 0, 0, 0, 0, time.Local)
+			} else {
+				targetDate = time.Date(baseMonth.Year(), baseMonth.Month(), 1, 0, 0, 0, 0, time.Local)
+			}
+
+			if !targetDate.Before(fechaInicio) && !targetDate.After(fechaFin) {
+				anio, sem := targetDate.ISOWeek()
+				dates = append(dates, RecurringPaymentDate{Fecha: targetDate, SemanaISO: sem, AnioISO: anio})
+			}
+
+			if len(dates) > 40 {
+				return nil, fmt.Errorf("el rango supera el límite máximo de 40 trimestres")
+			}
+		}
+
+	default:
+		return nil, fmt.Errorf("frecuencia no reconocida: %s", frecuencia)
+	}
+
+	if len(dates) == 0 {
+		return nil, fmt.Errorf("no se generaron fechas de pago válidas en el rango seleccionado")
+	}
+
+	return dates, nil
 }
 
 func normalizeBeneficiarioTipo(raw string) string {
@@ -722,6 +860,144 @@ func (h *PagosHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	actor := h.getActorName(r)
 
+	if req.EsRecurrente {
+		frec := strings.Title(strings.ToLower(strings.TrimSpace(req.RecurrenciaFrecuencia)))
+		if frec == "" {
+			frec = "Mensual"
+		}
+		tipoDia := strings.ToLower(strings.TrimSpace(req.RecurrenciaTipoDia))
+		if tipoDia != "cierre_mes" {
+			tipoDia = "inicio_mes"
+		}
+
+		fInicio, err := time.Parse("2006-01-02", strings.TrimSpace(req.RecurrenciaFechaInicio))
+		if err != nil {
+			fInicio = fechaPago
+		}
+		fFin, err := time.Parse("2006-01-02", strings.TrimSpace(req.RecurrenciaFechaFin))
+		if err != nil {
+			fFin = fInicio.AddDate(0, 3, 0)
+		}
+
+		recDates, err := generateRecurringDates(frec, tipoDia, fInicio, fFin)
+		if err != nil {
+			auth.WriteJSONError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		grupoID := fmt.Sprintf("REC-%s-%04d", time.Now().Format("20060102150405"), time.Now().Nanosecond()%10000)
+
+		var lastID int
+		_ = h.DB.QueryRowContext(r.Context(), "SELECT COALESCE(MAX(id), 0) FROM pagos").Scan(&lastID)
+
+		tx, err := h.DB.BeginTx(r.Context(), nil)
+		if err != nil {
+			auth.WriteJSONError(w, http.StatusInternalServerError, "error al iniciar transacción de pagos recurrentes: "+err.Error())
+			return
+		}
+		defer tx.Rollback()
+
+		stmt, err := tx.PrepareContext(r.Context(), `
+			INSERT INTO pagos (
+				numero_pago, pedido_id, tipo_beneficiario, referencia_pago,
+				proveedor_id, proveedor_nombre, proveedor_ruc, es_proveedor_temporal,
+				cliente_id, cliente_nombre, cliente_documento, cliente_telefono,
+				producto_id, producto_nombre, es_producto_temporal,
+				cantidad, monto_total, monto_pagado, saldo_pendiente,
+				estado_pago, metodo_pago, fecha_pago, semana_iso, anio_iso,
+				historial_parciales, notas, es_recurrente, recurrencia_frecuencia,
+				recurrencia_tipo_dia, recurrencia_fecha_inicio, recurrencia_fecha_fin,
+				recurrencia_grupo_id, created_by
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`)
+		if err != nil {
+			auth.WriteJSONError(w, http.StatusInternalServerError, "error al preparar inserción recurrente: "+err.Error())
+			return
+		}
+		defer stmt.Close()
+
+		totalCuotas := len(recDates)
+		var firstID int64
+		for idx, item := range recDates {
+			lastID++
+			numPago := fmt.Sprintf("PAG-%06d", lastID)
+			fItemStr := item.Fecha.Format("2006-01-02")
+
+			notaCuota := fmt.Sprintf("Pago Recurrente %s (%d/%d)", frec, idx+1, totalCuotas)
+			if strings.TrimSpace(req.Notas) != "" {
+				notaCuota = fmt.Sprintf("%s · %s", notaCuota, strings.TrimSpace(req.Notas))
+			}
+
+			estadoItem := estado
+			montoPagadoItem := montoPagado
+			saldoPendienteItem := saldoPendiente
+
+			if estado == "Pagado" {
+				montoPagadoItem = total
+				saldoPendienteItem = 0
+			} else if estado == "Pendiente" {
+				montoPagadoItem = 0
+				saldoPendienteItem = total
+			} else if estado == "Pago Parcial" {
+				if idx > 0 {
+					estadoItem = "Pendiente"
+					montoPagadoItem = 0
+					saldoPendienteItem = total
+				}
+			}
+
+			histItemJSON := "[]"
+			if estadoItem == "Pago Parcial" && montoPagadoItem > 0 {
+				hp := []models.PagoParcialItem{
+					{
+						Monto:      montoPagadoItem,
+						FechaPago:  fItemStr,
+						SemanaISO:  item.SemanaISO,
+						AnioISO:    item.AnioISO,
+						MetodoPago: metodo,
+						Notas:      notaCuota,
+					},
+				}
+				b, _ := json.Marshal(hp)
+				histItemJSON = string(b)
+			}
+
+			resRec, err := stmt.ExecContext(r.Context(),
+				numPago, req.PedidoID, tipoBen, refPago,
+				req.ProveedorID, provNom, strings.TrimSpace(req.ProveedorRUC), req.EsProveedorTemporal,
+				req.ClienteID, cliNom, strings.TrimSpace(req.ClienteDocumento), strings.TrimSpace(req.ClienteTelefono),
+				req.ProductoID, prodNom, req.EsProductoTemporal,
+				cant, total, montoPagadoItem, saldoPendienteItem,
+				estadoItem, metodo, fItemStr, item.SemanaISO, item.AnioISO,
+				histItemJSON, notaCuota, 1, frec, tipoDia,
+				fInicio.Format("2006-01-02"), fFin.Format("2006-01-02"), grupoID, actor,
+			)
+			if err != nil {
+				auth.WriteJSONError(w, http.StatusInternalServerError, "error al registrar cuota recurrente: "+err.Error())
+				return
+			}
+			if idx == 0 {
+				firstID, _ = resRec.LastInsertId()
+			}
+		}
+
+		if err := tx.Commit(); err != nil {
+			auth.WriteJSONError(w, http.StatusInternalServerError, "error al confirmar serie recurrente: "+err.Error())
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"message":        fmt.Sprintf("Se generaron exitosamente %d pagos recurrentes (%s)", totalCuotas, frec),
+			"id":             firstID,
+			"totalGenerados": totalCuotas,
+			"grupoId":        grupoID,
+			"frecuencia":     frec,
+		})
+		return
+	}
+
 	// Generar número de pago secuencial (ej. PAG-000001)
 	var lastID int
 	_ = h.DB.QueryRowContext(r.Context(), "SELECT COALESCE(MAX(id), 0) FROM pagos").Scan(&lastID)
@@ -735,8 +1011,10 @@ func (h *PagosHandler) Create(w http.ResponseWriter, r *http.Request) {
 			producto_id, producto_nombre, es_producto_temporal,
 			cantidad, monto_total, monto_pagado, saldo_pendiente,
 			estado_pago, metodo_pago, fecha_pago, semana_iso, anio_iso,
-			historial_parciales, notas, created_by
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			historial_parciales, notas, es_recurrente, recurrencia_frecuencia,
+			recurrencia_tipo_dia, recurrencia_fecha_inicio, recurrencia_fecha_fin,
+			recurrencia_grupo_id, created_by
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 
 	res, err := h.DB.ExecContext(r.Context(), insertSQL,
@@ -746,7 +1024,8 @@ func (h *PagosHandler) Create(w http.ResponseWriter, r *http.Request) {
 		req.ProductoID, prodNom, req.EsProductoTemporal,
 		cant, total, montoPagado, saldoPendiente,
 		estado, metodo, fechaPagoStr, semanaISO, anioISO,
-		histJSON, strings.TrimSpace(req.Notas), actor,
+		histJSON, strings.TrimSpace(req.Notas),
+		0, nil, nil, nil, nil, nil, actor,
 	)
 	if err != nil {
 		auth.WriteJSONError(w, http.StatusInternalServerError, "error al registrar pago: "+err.Error())

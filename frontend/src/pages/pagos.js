@@ -41,6 +41,15 @@ function formatDateDisplay(isoDateStr) {
   return isoDateStr;
 }
 
+function getNombreDiaSemana(isoDateStr) {
+  if (!isoDateStr) return '';
+  const clean = String(isoDateStr).split('T')[0];
+  const parts = clean.split('-').map(Number);
+  if (parts.length !== 3) return '';
+  const d = new Date(parts[0], parts[1] - 1, parts[2]);
+  return DIAS_SEMANA_ES[d.getDay()] || '';
+}
+
 function getISOWeekNumber(date) {
   const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
   const dayNum = d.getUTCDay() || 7;
@@ -65,6 +74,182 @@ function getISOWeekAndYearFromStr(isoDateStr) {
   const yearStart = new Date(Date.UTC(isoYear, 0, 1));
   const isoWeek = Math.ceil(((d - yearStart) / 86400000 + 1) / 7);
   return { week: isoWeek, year: isoYear };
+}
+
+function formatLocalDate(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function getMondayOfDateStr(dateStr) {
+  const clean = String(dateStr || '').split('T')[0];
+  const parts = clean.split('-').map(Number);
+  const d = parts.length === 3 ? new Date(parts[0], parts[1] - 1, parts[2]) : new Date();
+  const day = d.getDay(); // 0 is Sunday, 1 is Monday
+  const diff = day === 0 ? -6 : 1 - day;
+  d.setDate(d.getDate() + diff);
+  return formatLocalDate(d);
+}
+
+function addMonthsToDateStr(dateStr, months) {
+  const parts = String(dateStr || '').split('-').map(Number);
+  const d = new Date(parts[0], parts[1] - 1 + months, parts[2]);
+  return formatLocalDate(d);
+}
+
+function addWeeksToDateStr(dateStr, weeks) {
+  const parts = String(dateStr || '').split('-').map(Number);
+  const d = new Date(parts[0], parts[1] - 1, parts[2] + weeks * 7);
+  return formatLocalDate(d);
+}
+
+function getEndOfMonthDateStr(dateStr) {
+  const parts = String(dateStr || '').split('-').map(Number);
+  const d = new Date(parts[0], parts[1], 0);
+  return formatLocalDate(d);
+}
+
+function getStartOfMonthDateStr(dateStr) {
+  const parts = String(dateStr || '').split('-').map(Number);
+  const d = new Date(parts[0], parts[1] - 1, 1);
+  return formatLocalDate(d);
+}
+
+const DIAS_SEMANA_ES = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+const MESES_NOMBRES_ES = [
+  'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+  'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
+];
+
+function calculateRecurringDatesPreview(frecuencia, tipoDia, fechaInicioStr, fechaFinStr) {
+  if (!fechaInicioStr || !fechaFinStr) return [];
+  const startParts = fechaInicioStr.split('-').map(Number);
+  const endParts = fechaFinStr.split('-').map(Number);
+  const start = new Date(startParts[0], startParts[1] - 1, startParts[2]);
+  const end = new Date(endParts[0], endParts[1] - 1, endParts[2]);
+
+  if (end < start) return [];
+
+  const dates = [];
+  const frec = (frecuencia || 'Semanal').toLowerCase();
+
+  if (frec === 'diario') {
+    let cur = new Date(start);
+    while (cur <= end && dates.length < 366) {
+      const dStr = formatLocalDate(cur);
+      const iso = getISOWeekAndYearFromStr(dStr);
+      const diaNombre = DIAS_SEMANA_ES[cur.getDay()];
+      dates.push({
+        fecha: dStr,
+        dateStr: dStr,
+        diaNombre: diaNombre,
+        semanaIso: iso.week,
+        week: iso.week,
+        anioIso: iso.year,
+        year: iso.year,
+        badgeTexto: `Semana ISO ${iso.week}`,
+        detalleTexto: `Día ${diaNombre} · Pago diario regular`,
+      });
+      cur.setDate(cur.getDate() + 1);
+    }
+  } else if (frec === 'semanal') {
+    let cur = new Date(start);
+    const day = cur.getDay(); // 0 es Domingo, 1 es Lunes
+    const diff = day === 0 ? -6 : 1 - day;
+    cur.setDate(cur.getDate() + diff); // Iniciar lunes automáticamente según sistema ISO
+
+    while (cur <= end && dates.length < 156) {
+      const dStr = formatLocalDate(cur);
+      const iso = getISOWeekAndYearFromStr(dStr);
+      const sunday = new Date(cur.getFullYear(), cur.getMonth(), cur.getDate() + 6);
+      const sundayStr = formatLocalDate(sunday);
+      const diaNombre = DIAS_SEMANA_ES[cur.getDay()]; // Siempre 'Lunes'
+
+      dates.push({
+        fecha: dStr,
+        dateStr: dStr,
+        diaNombre: diaNombre,
+        semanaIso: iso.week,
+        week: iso.week,
+        anioIso: iso.year,
+        year: iso.year,
+        domingoFecha: sundayStr,
+        badgeTexto: `Semana ISO ${iso.week} (${iso.year})`,
+        detalleTexto: `Semana ISO: Lunes ${formatDateDisplay(dStr)} al Domingo ${formatDateDisplay(sundayStr)}`,
+      });
+      cur.setDate(cur.getDate() + 7);
+    }
+  } else if (frec === 'mensual') {
+    const totalMonths = (end.getFullYear() - start.getFullYear()) * 12 + (end.getMonth() - start.getMonth());
+    for (let i = 0; i <= totalMonths && dates.length < 60; i++) {
+      const y = start.getFullYear();
+      const m = start.getMonth() + i;
+      let target;
+      let modoLabel = '';
+      if (tipoDia === 'cierre_mes') {
+        target = new Date(y, m + 1, 0); // Cierre de mes (último día)
+        modoLabel = 'Cierre de Mes';
+      } else {
+        target = new Date(y, m, 1); // Inicio de mes (día 1)
+        modoLabel = 'Inicio de Mes';
+      }
+      if (target >= start && target <= end) {
+        const dStr = formatLocalDate(target);
+        const iso = getISOWeekAndYearFromStr(dStr);
+        const diaNombre = DIAS_SEMANA_ES[target.getDay()];
+        const mesNombre = MESES_NOMBRES_ES[target.getMonth()];
+
+        dates.push({
+          fecha: dStr,
+          dateStr: dStr,
+          diaNombre: diaNombre,
+          semanaIso: iso.week,
+          week: iso.week,
+          anioIso: iso.year,
+          year: iso.year,
+          badgeTexto: `${modoLabel} · Semana ISO ${iso.week}`,
+          detalleTexto: `${modoLabel} de ${mesNombre} ${target.getFullYear()} (corresponde a día ${diaNombre})`,
+        });
+      }
+    }
+  } else if (frec === 'trimestral') {
+    const totalMonths = (end.getFullYear() - start.getFullYear()) * 12 + (end.getMonth() - start.getMonth());
+    for (let i = 0; i <= totalMonths && dates.length < 40; i += 3) {
+      const y = start.getFullYear();
+      const m = start.getMonth() + i;
+      let target;
+      let modoLabel = '';
+      if (tipoDia === 'cierre_mes') {
+        target = new Date(y, m + 1, 0);
+        modoLabel = 'Cierre Trimestral';
+      } else {
+        target = new Date(y, m, 1);
+        modoLabel = 'Inicio Trimestral';
+      }
+      if (target >= start && target <= end) {
+        const dStr = formatLocalDate(target);
+        const iso = getISOWeekAndYearFromStr(dStr);
+        const diaNombre = DIAS_SEMANA_ES[target.getDay()];
+        const mesNombre = MESES_NOMBRES_ES[target.getMonth()];
+
+        dates.push({
+          fecha: dStr,
+          dateStr: dStr,
+          diaNombre: diaNombre,
+          semanaIso: iso.week,
+          week: iso.week,
+          anioIso: iso.year,
+          year: iso.year,
+          badgeTexto: `${modoLabel} · Semana ISO ${iso.week}`,
+          detalleTexto: `${modoLabel} (${mesNombre} ${target.getFullYear()}) · corresponde a día ${diaNombre}`,
+        });
+      }
+    }
+  }
+
+  return dates;
 }
 
 // Switch iOS estandarizado según AGENTS.md
@@ -578,10 +763,11 @@ export function renderPagosModule(container) {
         label: 'N° Pago',
         render: (row) => {
           const wrap = document.createElement('div');
-          wrap.className = 'cursor-pointer group flex flex-col items-start';
+          wrap.className = 'cursor-pointer group flex flex-col items-start gap-0.5';
           wrap.innerHTML = `
             <span class="font-mono font-bold text-brand group-hover:underline">${escapeHtml(row.numeroPago)}</span>
             <span class="text-[10px] text-slate-400">${formatDateDisplay(row.fechaPago)}</span>
+            ${row.esRecurrente ? `<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-indigo-100 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300 font-mono mt-0.5" title="Pago recurrente programado (${escapeHtml(row.recurrenciaFrecuencia || '')})"><i class="fa-solid fa-arrows-rotate text-[8px]"></i> Recurrente (${escapeHtml(row.recurrenciaFrecuencia || 'Prog.')})</span>` : ''}
           `;
           wrap.addEventListener('click', () => openDetallePagoModal(row));
           return wrap;
@@ -942,7 +1128,7 @@ export function renderPagosModule(container) {
         <div>
           <span class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Comprobante de Pago</span>
           <h3 class="text-base font-black text-brand font-mono">${escapeHtml(p.numeroPago)}</h3>
-          <span class="text-[11px] text-slate-500">Fecha de Pago: <strong>${formatDateDisplay(p.fechaPago)}</strong></span>
+          <span class="text-[11px] text-slate-500">Fecha de Pago: <strong>${getNombreDiaSemana(p.fechaPago) ? `${getNombreDiaSemana(p.fechaPago)}, ` : ''}${formatDateDisplay(p.fechaPago)}</strong></span>
         </div>
         <div class="flex items-center gap-2">
           <span class="px-2.5 py-1 rounded-full text-xs font-bold font-mono bg-purple-100 text-brand dark:bg-purple-950/60 dark:text-brand">
@@ -1024,6 +1210,35 @@ export function renderPagosModule(container) {
               )
               .join('')}
           </div>
+        </div>
+      `
+          : ''
+      }
+
+      ${
+        p.esRecurrente
+          ? `
+        <!-- Información de Pago Recurrente Programado -->
+        <div class="p-4 rounded-xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50/50 dark:bg-indigo-950/20 space-y-2">
+          <h4 class="text-xs font-bold uppercase tracking-wider text-indigo-700 dark:text-indigo-300 flex items-center gap-1.5 pb-1 border-b border-indigo-200/80 dark:border-indigo-800/80">
+            <i class="fa-solid fa-arrows-rotate text-indigo-600 dark:text-indigo-400"></i>
+            <span>Pago Recurrente / Programado</span>
+          </h4>
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 text-slate-700 dark:text-slate-200">
+            <div>
+              <p class="text-[10px] text-slate-500 uppercase font-bold">Frecuencia</p>
+              <p class="text-xs font-bold text-indigo-600 dark:text-indigo-400">${escapeHtml(p.recurrenciaFrecuencia || 'Recurrente')}</p>
+            </div>
+            <div>
+              <p class="text-[10px] text-slate-500 uppercase font-bold">Modalidad de Fecha</p>
+              <p class="text-xs font-bold">${p.recurrenciaTipoDia === 'cierre_mes' ? 'Cierre de mes (Último día)' : p.recurrenciaTipoDia === 'inicio_mes' ? 'Inicio de mes (Día 1)' : 'Semana ISO (Inicia lunes y termina domingo)'}</p>
+            </div>
+            <div>
+              <p class="text-[10px] text-slate-500 uppercase font-bold">Periodo Programado</p>
+              <p class="text-xs font-mono font-bold">${formatDateDisplay(p.recurrenciaFechaInicio)} → ${formatDateDisplay(p.recurrenciaFechaFin)}</p>
+            </div>
+          </div>
+          ${p.recurrenciaGrupoId ? `<p class="text-[10px] text-slate-400 font-mono">ID de Grupo Recurrente: ${escapeHtml(p.recurrenciaGrupoId)}</p>` : ''}
         </div>
       `
           : ''
@@ -1218,6 +1433,96 @@ export function renderPagosModule(container) {
         </p>
       </div>
 
+      <!-- Sección de Pago Recurrente / Programado -->
+      <div class="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-3">
+        <div class="flex items-center justify-between gap-3" id="recurrente-toggle-holder">
+          <div>
+            <span class="text-xs font-bold text-slate-800 dark:text-slate-100 flex items-center gap-1.5">
+              <i class="fa-solid fa-arrows-rotate text-brand"></i>
+              <span>¿Es un Pago Recurrente / Programado?</span>
+            </span>
+            <p class="text-[11px] text-slate-400">Permite generar pagos periódicos automáticos (diarios, semanales, mensuales o trimestrales) en un rango de fechas para cualquier beneficiario.</p>
+          </div>
+        </div>
+
+        <div id="recurrente-config-box" class="space-y-3.5 pt-2 border-t border-slate-200 dark:border-slate-700 hidden">
+          <!-- 1. Frecuencia -->
+          <div>
+            <label class="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">Frecuencia de Recurrencia</label>
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              <button type="button" data-frec="Diario" class="btn-rec-frec py-2 px-3 rounded-xl text-xs font-bold border transition cursor-pointer flex flex-col items-center gap-1 border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+                <i class="fa-solid fa-calendar-day text-sm"></i>
+                <span>Diario</span>
+              </button>
+              <button type="button" data-frec="Semanal" class="btn-rec-frec py-2 px-3 rounded-xl text-xs font-bold border transition cursor-pointer flex flex-col items-center gap-1 bg-brand text-white border-brand shadow-xs">
+                <i class="fa-solid fa-calendar-week text-sm"></i>
+                <span>Semanal</span>
+                <span class="text-[9px] font-normal opacity-90">Inicia lunes</span>
+              </button>
+              <button type="button" data-frec="Mensual" class="btn-rec-frec py-2 px-3 rounded-xl text-xs font-bold border transition cursor-pointer flex flex-col items-center gap-1 border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+                <i class="fa-solid fa-calendar text-sm"></i>
+                <span>Mensual</span>
+              </button>
+              <button type="button" data-frec="Trimestral" class="btn-rec-frec py-2 px-3 rounded-xl text-xs font-bold border transition cursor-pointer flex flex-col items-center gap-1 border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+                <i class="fa-solid fa-calendar-days text-sm"></i>
+                <span>Trimestral</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- 2. Modalidad de aplicación (Solo para Mensual o Trimestral: Cierre de mes vs Inicio de mes) -->
+          <div id="rec-mes-modalidad-box" class="p-3 rounded-xl bg-purple-50/60 dark:bg-purple-950/30 border border-brand/20 space-y-2 hidden">
+            <label class="block text-xs font-bold text-slate-700 dark:text-slate-300">
+              ¿En qué momento del periodo se registrará el pago?
+            </label>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <button type="button" id="btn-rec-inicio-mes" class="btn-rec-tipo-dia py-2 px-3 rounded-xl text-xs font-bold border transition cursor-pointer flex items-center justify-center gap-2 border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+                <i class="fa-solid fa-calendar-plus"></i>
+                <span>Inicio de Mes (Día 1)</span>
+              </button>
+              <button type="button" id="btn-rec-cierre-mes" class="btn-rec-tipo-dia py-2 px-3 rounded-xl text-xs font-bold border transition cursor-pointer flex items-center justify-center gap-2 bg-brand text-white border-brand shadow-xs">
+                <i class="fa-solid fa-calendar-check"></i>
+                <span>Cierre de Mes (Último Día)</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- 3. Rango de Fechas (De qué fecha a qué fecha) -->
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Fecha de Inicio *</label>
+              <input type="date" id="rec-fecha-inicio" value="${getMondayOfDateStr(todayStr)}"
+                class="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-brand font-semibold" />
+              <p id="rec-fecha-inicio-hint" class="text-[10px] text-brand font-medium mt-1">Inicia automáticamente en lunes</p>
+            </div>
+            <div>
+              <label class="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Fecha de Fin *</label>
+              <input type="date" id="rec-fecha-fin" value="${addWeeksToDateStr(getMondayOfDateStr(todayStr), 4)}"
+                class="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-brand font-semibold" />
+              <p id="rec-fecha-fin-hint" class="text-[10px] text-slate-400 mt-1">Límite del ciclo recurrente</p>
+            </div>
+          </div>
+
+          <!-- 4. Vista Previa de Pagos Recurrentes a Generarse -->
+          <div id="rec-preview-box" class="p-3.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-2">
+            <div class="flex items-center justify-between pb-1.5 border-b border-slate-100 dark:border-slate-800">
+              <span class="text-xs font-bold text-slate-800 dark:text-slate-100 flex items-center gap-1.5">
+                <i class="fa-solid fa-list-check text-brand"></i>
+                <span>Proyección de Cuotas / Pagos a Generar</span>
+              </span>
+              <span id="rec-preview-counter" class="text-xs font-mono font-black text-brand bg-purple-50 dark:bg-brand/20 px-2 py-0.5 rounded-md">
+                0 cuotas
+              </span>
+            </div>
+            <div id="rec-preview-list" class="max-h-36 overflow-y-auto space-y-1 pr-1 text-[11px]"></div>
+            <div id="rec-preview-total" class="pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs font-bold text-slate-800 dark:text-slate-100">
+              <span class="text-slate-500">Monto Total Proyectado:</span>
+              <span id="rec-preview-total-val" class="font-mono text-brand font-black text-sm">0 Gs.</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- Método de Pago y Fecha -->
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>
@@ -1263,8 +1568,34 @@ export function renderPagosModule(container) {
       </div>
     `;
 
-    // Contador numérico
-    const counter = createQuantityCounter({ value: 1, min: 1 });
+    // Cálculos de montos, inputs y referencias principales
+    let unitCost = 0;
+    const totalInp = content.querySelector('#pago-monto-total');
+    const montoPagadoInp = content.querySelector('#modal-monto-pagado');
+    const fechaParcialInp = content.querySelector('#modal-fecha-parcial');
+    const semanaParcialBadge = content.querySelector('#modal-semana-parcial-badge');
+    const pagoFechaInp = content.querySelector('#pago-fecha');
+    const pagoFechaHint = content.querySelector('#pago-fecha-semana-hint');
+    const saldoCalcEl = content.querySelector('#modal-saldo-calc');
+    const partialBox = content.querySelector('#modal-partial-box');
+
+    // Contador numérico estandarizado según AGENTS.md
+    const counter = createQuantityCounter({
+      value: 1,
+      min: 1,
+      onChange: (newQty) => {
+        if (unitCost > 0) {
+          totalInp.value = formatGuaranies(Math.round(unitCost * newQty));
+        } else {
+          const curTot = parseGuaranies(totalInp.value);
+          if (curTot > 0) {
+            unitCost = curTot;
+            totalInp.value = formatGuaranies(Math.round(unitCost * newQty));
+          }
+        }
+        updateMath();
+      },
+    });
     content.querySelector('#counter-holder').appendChild(counter.element);
 
     const btnTipoProv = content.querySelector('#btn-tipo-prov');
@@ -1565,9 +1896,10 @@ export function renderPagosModule(container) {
               selectedProd = p;
               inp.value = p.nombre;
               sug.classList.add('hidden');
-              if (p.costoCompra) {
-                const totalInp = content.querySelector('#pago-monto-total');
-                totalInp.value = formatGuaranies(p.costoCompra * counter.getValue());
+              if (p.costoCompra != null && Number(p.costoCompra) > 0) {
+                unitCost = Number(p.costoCompra);
+                const qty = Math.max(1, counter.getValue());
+                totalInp.value = formatGuaranies(Math.round(unitCost * qty));
                 updateMath();
               }
             });
@@ -1602,15 +1934,7 @@ export function renderPagosModule(container) {
     }
     renderProductoUI();
 
-    // Cálculos de montos, fechas y semana de Pago Parcial
-    const totalInp = content.querySelector('#pago-monto-total');
-    const montoPagadoInp = content.querySelector('#modal-monto-pagado');
-    const fechaParcialInp = content.querySelector('#modal-fecha-parcial');
-    const semanaParcialBadge = content.querySelector('#modal-semana-parcial-badge');
-    const pagoFechaInp = content.querySelector('#pago-fecha');
-    const pagoFechaHint = content.querySelector('#pago-fecha-semana-hint');
-    const saldoCalcEl = content.querySelector('#modal-saldo-calc');
-    const partialBox = content.querySelector('#modal-partial-box');
+    // Sincronización de fecha y semana de Pago Parcial
 
     function syncPartialDateBadge(dateStr) {
       const iso = getISOWeekAndYearFromStr(dateStr);
@@ -1634,6 +1958,203 @@ export function renderPagosModule(container) {
       syncPartialDateBadge(val);
     });
 
+    // Recurrencia / Pagos Programados
+    let isRecurrente = false;
+    let recFrecuencia = 'Semanal';
+    let recTipoDia = 'cierre_mes';
+    let currentRecPreviewDates = [];
+
+    const recToggleHolder = content.querySelector('#recurrente-toggle-holder');
+    const recConfigBox = content.querySelector('#recurrente-config-box');
+    const recMesModalidadBox = content.querySelector('#rec-mes-modalidad-box');
+    const recFechaInicioInp = content.querySelector('#rec-fecha-inicio');
+    const recFechaFinInp = content.querySelector('#rec-fecha-fin');
+    const recFechaInicioHint = content.querySelector('#rec-fecha-inicio-hint');
+    const recPreviewList = content.querySelector('#rec-preview-list');
+    const recPreviewCounter = content.querySelector('#rec-preview-counter');
+    const recPreviewTotalVal = content.querySelector('#rec-preview-total-val');
+    const btnRecInicioMes = content.querySelector('#btn-rec-inicio-mes');
+    const btnRecCierreMes = content.querySelector('#btn-rec-cierre-mes');
+
+    function updateRecFrecButtons() {
+      content.querySelectorAll('.btn-rec-frec').forEach((b) => {
+        const f = b.dataset.frec;
+        if (f === recFrecuencia) {
+          b.className = 'btn-rec-frec py-2 px-3 rounded-xl text-xs font-bold border transition cursor-pointer flex flex-col items-center gap-1 bg-brand text-white border-brand shadow-xs';
+        } else {
+          b.className = 'btn-rec-frec py-2 px-3 rounded-xl text-xs font-bold border transition cursor-pointer flex flex-col items-center gap-1 border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300';
+        }
+      });
+    }
+
+    function updateRecTipoDiaButtons() {
+      const activeClass = 'btn-rec-tipo-dia py-2 px-3 rounded-xl text-xs font-bold border transition cursor-pointer flex items-center justify-center gap-2 bg-brand text-white border-brand shadow-xs';
+      const inactiveClass = 'btn-rec-tipo-dia py-2 px-3 rounded-xl text-xs font-bold border transition cursor-pointer flex items-center justify-center gap-2 border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300';
+      if (btnRecInicioMes && btnRecCierreMes) {
+        btnRecInicioMes.className = recTipoDia === 'inicio_mes' ? activeClass : inactiveClass;
+        btnRecCierreMes.className = recTipoDia === 'cierre_mes' ? activeClass : inactiveClass;
+      }
+    }
+
+    function syncRecurrenceUI() {
+      updateRecFrecButtons();
+      updateRecTipoDiaButtons();
+
+      if (recFrecuencia === 'Mensual' || recFrecuencia === 'Trimestral') {
+        recMesModalidadBox?.classList.remove('hidden');
+        if (recTipoDia === 'cierre_mes') {
+          if (recFechaInicioInp) {
+            recFechaInicioInp.value = getEndOfMonthDateStr(recFechaInicioInp.value || todayStr);
+          }
+          if (recFechaInicioHint) {
+            recFechaInicioHint.textContent = `Aplica al cierre de mes (${recFrecuencia.toLowerCase()})`;
+            recFechaInicioHint.className = 'text-[10px] text-brand font-medium mt-1';
+          }
+        } else {
+          if (recFechaInicioInp) {
+            recFechaInicioInp.value = getStartOfMonthDateStr(recFechaInicioInp.value || todayStr);
+          }
+          if (recFechaInicioHint) {
+            recFechaInicioHint.textContent = `Aplica al inicio de mes (día 1) (${recFrecuencia.toLowerCase()})`;
+            recFechaInicioHint.className = 'text-[10px] text-brand font-medium mt-1';
+          }
+        }
+        const monthsToAdd = recFrecuencia === 'Trimestral' ? 6 : 3;
+        if (recFechaFinInp && recFechaInicioInp) {
+          recFechaFinInp.value = addMonthsToDateStr(recFechaInicioInp.value, monthsToAdd);
+        }
+      } else if (recFrecuencia === 'Semanal') {
+        recMesModalidadBox?.classList.add('hidden');
+        if (recFechaInicioInp) {
+          recFechaInicioInp.value = getMondayOfDateStr(recFechaInicioInp.value || todayStr);
+        }
+        if (recFechaFinInp && recFechaInicioInp) {
+          recFechaFinInp.value = addWeeksToDateStr(recFechaInicioInp.value, 4);
+        }
+        if (recFechaInicioHint) {
+          recFechaInicioHint.textContent = 'Inicia automáticamente en lunes';
+          recFechaInicioHint.className = 'text-[10px] text-brand font-medium mt-1';
+        }
+      } else {
+        // Diario
+        recMesModalidadBox?.classList.add('hidden');
+        if (recFechaInicioHint) {
+          recFechaInicioHint.textContent = 'Genera un pago por cada día en el rango';
+          recFechaInicioHint.className = 'text-[10px] text-slate-400 mt-1';
+        }
+      }
+
+      updateRecurrencePreview();
+    }
+
+    function updateRecurrencePreview() {
+      if (!isRecurrente || !recPreviewList) return;
+      const fIni = recFechaInicioInp ? recFechaInicioInp.value : '';
+      const fFin = recFechaFinInp ? recFechaFinInp.value : '';
+      currentRecPreviewDates = calculateRecurringDatesPreview(recFrecuencia, recTipoDia, fIni, fFin);
+
+      const cuotasCount = currentRecPreviewDates.length;
+      if (recPreviewCounter) {
+        recPreviewCounter.textContent = `${cuotasCount} cuota${cuotasCount === 1 ? '' : 's'}`;
+      }
+
+      const totalUnit = parseGuaranies(totalInp.value);
+      const totalProyectado = totalUnit * cuotasCount;
+      if (recPreviewTotalVal) {
+        recPreviewTotalVal.textContent = formatGuaranies(totalProyectado);
+      }
+
+      recPreviewList.innerHTML = '';
+      if (cuotasCount === 0) {
+        recPreviewList.innerHTML = '<p class="text-slate-400 italic text-center py-2">No se proyectaron pagos. Ajuste el rango de fechas.</p>';
+        return;
+      }
+
+      currentRecPreviewDates.forEach((p, idx) => {
+        const row = document.createElement('div');
+        row.className = 'flex flex-wrap items-center justify-between gap-2 p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/80 hover:border-brand/40 transition';
+        row.innerHTML = `
+          <div class="flex items-center gap-2.5">
+            <span class="w-6 h-6 rounded-full bg-brand text-white text-[11px] font-bold flex items-center justify-center shrink-0">#${idx + 1}</span>
+            <div>
+              <div class="flex flex-wrap items-center gap-1.5 sm:gap-2">
+                <span class="font-black text-slate-900 dark:text-white text-xs">${p.diaNombre}, ${formatDateDisplay(p.fecha)}</span>
+                <span class="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-purple-100 text-brand dark:bg-brand/20 dark:text-brand">
+                  ${p.badgeTexto}
+                </span>
+              </div>
+              <p class="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">${p.detalleTexto}</p>
+            </div>
+          </div>
+          <div class="text-right">
+            <span class="font-mono font-black text-slate-900 dark:text-white text-xs">${formatGuaranies(totalUnit)}</span>
+            <span class="block text-[9px] text-slate-400">Cuota programada</span>
+          </div>
+        `;
+        recPreviewList.appendChild(row);
+      });
+    }
+
+    // Botones de frecuencia
+    content.querySelectorAll('.btn-rec-frec').forEach((b) => {
+      b.addEventListener('click', () => {
+        recFrecuencia = b.dataset.frec;
+        syncRecurrenceUI();
+      });
+    });
+
+    // Botones de tipo día
+    btnRecInicioMes?.addEventListener('click', () => {
+      recTipoDia = 'inicio_mes';
+      syncRecurrenceUI();
+    });
+    btnRecCierreMes?.addEventListener('click', () => {
+      recTipoDia = 'cierre_mes';
+      syncRecurrenceUI();
+    });
+
+    recFechaInicioInp?.addEventListener('change', (e) => {
+      if (recFrecuencia === 'Semanal') {
+        const monday = getMondayOfDateStr(e.target.value);
+        if (monday !== e.target.value) {
+          e.target.value = monday;
+          toast.info('Se ajustó automáticamente al lunes de esa semana (inicio ISO).');
+        }
+      } else if ((recFrecuencia === 'Mensual' || recFrecuencia === 'Trimestral') && recTipoDia === 'cierre_mes') {
+        e.target.value = getEndOfMonthDateStr(e.target.value);
+      } else if ((recFrecuencia === 'Mensual' || recFrecuencia === 'Trimestral') && recTipoDia === 'inicio_mes') {
+        e.target.value = getStartOfMonthDateStr(e.target.value);
+      }
+      updateRecurrencePreview();
+    });
+
+    recFechaInicioInp?.addEventListener('input', () => updateRecurrencePreview());
+
+    recFechaFinInp?.addEventListener('change', () => {
+      updateRecurrencePreview();
+    });
+
+    recFechaFinInp?.addEventListener('input', () => updateRecurrencePreview());
+
+    // iOS Toggle para Pagos Recurrentes
+    if (recToggleHolder) {
+      const recToggle = createIOSToggle({
+        label: '',
+        checked: isRecurrente,
+        activeColor: 'purple',
+        onChange: (chk) => {
+          isRecurrente = chk;
+          if (isRecurrente) {
+            recConfigBox?.classList.remove('hidden');
+            syncRecurrenceUI();
+          } else {
+            recConfigBox?.classList.add('hidden');
+          }
+        },
+      });
+      recToggleHolder.appendChild(recToggle.element);
+    }
+
     function updateMath() {
       const tot = parseGuaranies(totalInp.value);
       if (estadoPago === 'Pagado') {
@@ -1647,11 +2168,16 @@ export function renderPagosModule(container) {
         const sal = Math.max(0, tot - pag);
         saldoCalcEl.textContent = formatGuaranies(sal);
       }
+      if (isRecurrente) {
+        updateRecurrencePreview();
+      }
     }
 
     totalInp.addEventListener('input', (e) => {
       const n = parseGuaranies(e.target.value);
       e.target.value = formatGuaranies(n);
+      const qty = Math.max(1, counter.getValue());
+      unitCost = n / qty;
       updateMath();
     });
 
@@ -1815,6 +2341,24 @@ export function renderPagosModule(container) {
           return;
         }
 
+        if (isRecurrente) {
+          const fIni = recFechaInicioInp ? recFechaInicioInp.value : '';
+          const fFin = recFechaFinInp ? recFechaFinInp.value : '';
+          if (!fIni || !fFin) {
+            toast.error('Indique fecha de inicio y fin para el pago recurrente.');
+            return;
+          }
+          if (fFin < fIni) {
+            toast.error('La fecha de fin no puede ser anterior a la fecha de inicio.');
+            return;
+          }
+          currentRecPreviewDates = calculateRecurringDatesPreview(recFrecuencia, recTipoDia, fIni, fFin);
+          if (!currentRecPreviewDates || currentRecPreviewDates.length === 0) {
+            toast.error('El rango de fechas no genera ninguna cuota recurrente.');
+            return;
+          }
+        }
+
         const metodo = content.querySelector('#pago-metodo').value;
         let fecha = content.querySelector('#pago-fecha').value || getTodayISODate();
         let fechaParcial = '';
@@ -1892,6 +2436,11 @@ export function renderPagosModule(container) {
           historialParciales: historialParciales,
           pedidoId: pedidoIdVal,
           notas: notasVal,
+          esRecurrente: isRecurrente,
+          recurrenciaFrecuencia: isRecurrente ? recFrecuencia : '',
+          recurrenciaTipoDia: isRecurrente ? recTipoDia : '',
+          recurrenciaFechaInicio: isRecurrente && recFechaInicioInp ? recFechaInicioInp.value : '',
+          recurrenciaFechaFin: isRecurrente && recFechaFinInp ? recFechaFinInp.value : '',
         };
 
         try {
@@ -2352,6 +2901,8 @@ export function renderPagosModule(container) {
       { id: 'saldoPendiente', label: 'Saldo Pendiente (Gs.)', default: true, isMoney: true, getValue: (r) => formatGuaranies(r.saldoPendiente) },
       { id: 'estadoPago', label: 'Estado del Pago', default: true, getValue: (r) => r.estadoPago },
       { id: 'metodoPago', label: 'Método de Pago', default: true, getValue: (r) => r.metodoPago || 'Efectivo' },
+      { id: 'esRecurrente', label: '¿Es Recurrente?', default: false, getValue: (r) => (r.esRecurrente ? `Sí (${r.recurrenciaFrecuencia || ''})` : 'No') },
+      { id: 'recurrenciaPeriodo', label: 'Periodo Recurrente', default: false, getValue: (r) => (r.esRecurrente && r.recurrenciaFechaInicio ? `${r.recurrenciaFechaInicio} a ${r.recurrenciaFechaFin}` : '—') },
       { id: 'notas', label: 'Notas / Observaciones', default: false, getValue: (r) => r.notas || '' },
     ];
 
