@@ -639,6 +639,16 @@ ALTER TABLE `pagos` ADD COLUMN `recurrencia_fecha_inicio` DATE NULL DEFAULT NULL
 ALTER TABLE `pagos` ADD COLUMN `recurrencia_fecha_fin` DATE NULL DEFAULT NULL AFTER `recurrencia_fecha_inicio`;
 ALTER TABLE `pagos` ADD COLUMN `recurrencia_grupo_id` VARCHAR(60) NULL DEFAULT NULL AFTER `recurrencia_fecha_fin`;
 
+-- ============================================================================
+-- MÓDULO PEDIDOS: CAMPOS DE SEÑA / ANTICIPO, FECHA Y SEMANA ISO DE SEÑA
+-- ============================================================================
+ALTER TABLE `pedidos` ADD COLUMN `tiene_sena` TINYINT(1) NOT NULL DEFAULT 0 AFTER `fecha_cobro`;
+ALTER TABLE `pedidos` ADD COLUMN `monto_sena` DECIMAL(15,2) NOT NULL DEFAULT 0 AFTER `tiene_sena`;
+ALTER TABLE `pedidos` ADD COLUMN `fecha_sena` DATE NULL DEFAULT NULL AFTER `monto_sena`;
+ALTER TABLE `pedidos` ADD COLUMN `semana_sena_iso` INT NULL DEFAULT NULL AFTER `fecha_sena`;
+ALTER TABLE `pedidos` ADD COLUMN `metodo_pago_sena` VARCHAR(60) NULL DEFAULT 'Efectivo' AFTER `semana_sena_iso`;
+
+
 
 
 

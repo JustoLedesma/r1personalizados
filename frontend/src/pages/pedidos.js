@@ -172,10 +172,15 @@ export function renderPedidosModule(container) {
       // Proveedores
       proveedores: [],
 
-      // Condición de venta y entrega
+      // Condición de venta, seña y entrega
       condicionVenta: 'Contado', // 'Contado' | 'Credito'
       tipoPago: 'Total', // 'Total' | 'Parcial'
       fechaCobro: '',
+      tieneSena: false,
+      montoSena: 0,
+      fechaSena: getTodayIsoDate(),
+      semanaSenaIso: getISOWeekNumber(new Date()),
+      metodoPagoSena: 'Efectivo',
       montoAbonado: 0,
       modalidadEntrega: 'Retiro en Local', // 'Retiro en Local' | 'Envío a Domicilio' | 'Encomienda' | 'Otro'
       modalidadEntregaOtro: '',
@@ -2690,69 +2695,131 @@ export function renderPedidosModule(container) {
     const condLeft = document.createElement('div');
     condLeft.className = 'lg:col-span-2 space-y-4';
 
-    // Fila: Condición de Venta + Modalidad de Entrega
+    // Fila: Condición de Venta + Modalidad de Entrega (reubicada) + SEÑA (nueva sección)
     condLeft.innerHTML = `
-      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <div>
-          <label class="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-            4. CONDICIÓN DE VENTA <span class="text-danger">*</span>
-          </label>
-          <select id="select-condicion"
-            class="w-full px-3.5 py-2.5 text-xs sm:text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-brand font-bold">
-            <option value="Contado" ${state.form.condicionVenta === 'Contado' ? 'selected' : ''}>Contado</option>
-            <option value="Credito" ${state.form.condicionVenta === 'Credito' ? 'selected' : ''}>Crédito</option>
-          </select>
-          <p class="text-[10px] text-slate-400 mt-1">Cobro al contado o a crédito.</p>
-        </div>
-        <div>
-          <label class="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-            MODALIDAD DE ENTREGA <span class="text-danger">*</span>
-          </label>
-          <select id="select-modalidad"
-            class="w-full px-3.5 py-2.5 text-xs sm:text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-brand font-bold">
-            <option value="Retiro en Local" ${state.form.modalidadEntrega === 'Retiro en Local' ? 'selected' : ''}>Retiro en Local</option>
-            <option value="Envío a Domicilio" ${state.form.modalidadEntrega === 'Envío a Domicilio' ? 'selected' : ''}>Envío a Domicilio</option>
-            <option value="Encomienda" ${state.form.modalidadEntrega === 'Encomienda' ? 'selected' : ''}>Encomienda</option>
-            <option value="Otro" ${state.form.modalidadEntrega === 'Otro' ? 'selected' : ''}>Otro</option>
-          </select>
-          <p class="text-[10px] text-slate-400 mt-1">Retiro en local o entrega por delivery.</p>
-        </div>
-      </div>
-      <div id="otro-modalidad-wrap" class="hidden">
-        <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Especifique modalidad de entrega</label>
-        <input type="text" id="inp-modalidad-otro" value="${escapeHtml(state.form.modalidadEntregaOtro)}"
-          placeholder="Ej. Transporte encomienda Asunción Express"
-          class="w-full px-3.5 py-2 text-xs sm:text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-brand" />
-      </div>
-      <div id="credito-options-wrap" class="p-4 rounded-xl bg-purple-50/60 dark:bg-brand/10 border border-purple-100 dark:border-brand/20 space-y-3 ${
-        state.form.condicionVenta === 'Credito' ? '' : 'hidden'
-      }">
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
+        <!-- COLUMNA 1: VENTA Y ENTREGA -->
+        <div class="space-y-4">
           <div>
-            <label class="block text-xs font-bold text-slate-800 dark:text-slate-200 mb-1">
-              Fecha de Vencimiento / Cobro <span class="text-[11px] font-normal text-slate-400">(Opcional)</span>
+            <label class="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+              4. CONDICIÓN DE VENTA <span class="text-danger">*</span>
             </label>
-            <input type="date" id="credito-fecha" value="${escapeHtml(state.form.fechaCobro)}"
-              class="w-full px-3 py-2 text-xs sm:text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-brand font-semibold" />
-          </div>
-          <div>
-            <label class="block text-xs font-bold text-slate-800 dark:text-slate-200 mb-1">Tipo de Pago <span class="text-danger">*</span></label>
-            <select id="credito-tipo-pago"
-              class="w-full px-3 py-2 text-xs sm:text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-brand font-semibold">
-              <option value="Total" ${state.form.tipoPago === 'Total' ? 'selected' : ''}>Total (Sin anticipo)</option>
-              <option value="Parcial" ${state.form.tipoPago === 'Parcial' ? 'selected' : ''}>Parcial (Con seña / anticipo)</option>
+            <select id="select-condicion"
+              class="w-full px-3.5 py-2.5 text-xs sm:text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-brand font-bold">
+              <option value="Contado" ${state.form.condicionVenta === 'Contado' ? 'selected' : ''}>Contado</option>
+              <option value="Credito" ${state.form.condicionVenta === 'Credito' ? 'selected' : ''}>Crédito</option>
             </select>
+            <p class="text-[10px] text-slate-400 mt-1">Cobro al contado o a crédito.</p>
+          </div>
+
+          <!-- MODALIDAD DE ENTREGA (Reubicada aquí según instrucción) -->
+          <div>
+            <label class="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+              MODALIDAD DE ENTREGA <span class="text-danger">*</span>
+            </label>
+            <select id="select-modalidad"
+              class="w-full px-3.5 py-2.5 text-xs sm:text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-brand font-bold">
+              <option value="Retiro en Local" ${state.form.modalidadEntrega === 'Retiro en Local' ? 'selected' : ''}>Retiro en Local</option>
+              <option value="Envío a Domicilio" ${state.form.modalidadEntrega === 'Envío a Domicilio' ? 'selected' : ''}>Envío a Domicilio</option>
+              <option value="Encomienda" ${state.form.modalidadEntrega === 'Encomienda' ? 'selected' : ''}>Encomienda</option>
+              <option value="Otro" ${state.form.modalidadEntrega === 'Otro' ? 'selected' : ''}>Otro</option>
+            </select>
+            <p class="text-[10px] text-slate-400 mt-1">Retiro en local o entrega por delivery.</p>
+          </div>
+
+          <div id="otro-modalidad-wrap" class="${state.form.modalidadEntrega === 'Otro' ? '' : 'hidden'}">
+            <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Especifique modalidad de entrega</label>
+            <input type="text" id="inp-modalidad-otro" value="${escapeHtml(state.form.modalidadEntregaOtro)}"
+              placeholder="Ej. Transporte encomienda Asunción Express"
+              class="w-full px-3.5 py-2 text-xs sm:text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-brand" />
+          </div>
+
+          <div id="credito-options-wrap" class="p-3.5 rounded-xl bg-purple-50/60 dark:bg-brand/10 border border-purple-100 dark:border-brand/20 space-y-2.5 ${
+            state.form.condicionVenta === 'Credito' ? '' : 'hidden'
+          }">
+            <div>
+              <label class="block text-xs font-bold text-slate-800 dark:text-slate-200 mb-1">
+                Fecha de Vencimiento / Cobro del Crédito <span class="text-[11px] font-normal text-slate-400">(Opcional)</span>
+              </label>
+              <input type="date" id="credito-fecha" value="${escapeHtml(state.form.fechaCobro)}"
+                class="w-full px-3 py-2 text-xs sm:text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-brand font-semibold" />
+            </div>
           </div>
         </div>
-        <div id="parcial-wrap" class="${state.form.tipoPago === 'Parcial' ? '' : 'hidden'} grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-purple-200/60 dark:border-brand/20">
-          <div>
-            <label class="block text-xs font-bold text-slate-800 dark:text-slate-200 mb-1">Monto Abonado (Gs.) <span class="text-danger">*</span></label>
-            <input type="text" id="credito-monto-abonado" value="${formatGuaranies(state.form.montoAbonado)}"
-              class="w-full px-3 py-2 text-xs sm:text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-brand font-mono font-bold" />
+
+        <!-- COLUMNA 2: SEÑA / ENTREGA INICIAL (Agregada en lugar de Modalidad de Entrega) -->
+        <div class="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200/80 dark:border-slate-700/80 space-y-3">
+          <div class="flex items-center justify-between gap-3 pb-2.5 border-b border-slate-200/60 dark:border-slate-700/60">
+            <div class="flex items-center gap-2">
+              <div class="w-7 h-7 rounded-lg bg-brand/10 dark:bg-brand/20 flex items-center justify-center text-brand text-xs">
+                <i class="fa-solid fa-hand-holding-dollar"></i>
+              </div>
+              <div>
+                <span class="block text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider">Seña / Anticipo</span>
+                <span class="block text-[10px] text-slate-400">¿El cliente entregó una seña?</span>
+              </div>
+            </div>
+            <!-- Switch iOS -->
+            <label class="relative inline-flex items-center cursor-pointer select-none">
+              <input type="checkbox" id="toggle-sena" class="sr-only peer" ${state.form.tieneSena ? 'checked' : ''} />
+              <div class="w-11 h-6 bg-slate-300 dark:bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+            </label>
           </div>
-          <div class="px-3.5 py-2 rounded-xl bg-white dark:bg-slate-800 border border-purple-200 dark:border-brand/30 flex flex-col justify-center">
-            <p class="text-[10px] text-slate-400 font-semibold">Saldo Pendiente Calculado</p>
-            <p id="credito-saldo-calc" class="text-sm font-black text-rose-600 dark:text-rose-400 font-mono">0 Gs.</p>
+
+          <div id="sena-active-wrap" class="${state.form.tieneSena ? '' : 'hidden'} space-y-3">
+            <div>
+              <div class="flex items-center justify-between mb-1">
+                <label class="block text-xs font-bold text-slate-700 dark:text-slate-300">
+                  Monto de la Seña (Gs.) <span class="text-danger">*</span>
+                </label>
+                <div class="flex items-center gap-1.5">
+                  <button type="button" id="btn-sena-50" class="text-[10px] px-2 py-0.5 rounded font-bold bg-white dark:bg-slate-800 text-brand border border-brand/40 hover:bg-brand hover:text-white transition">50%</button>
+                  <button type="button" id="btn-sena-100" class="text-[10px] px-2 py-0.5 rounded font-bold bg-white dark:bg-slate-800 text-brand border border-brand/40 hover:bg-brand hover:text-white transition">100%</button>
+                </div>
+              </div>
+              <input type="text" id="inp-sena-monto" value="${formatGuaranies(state.form.montoSena)}"
+                placeholder="0 Gs."
+                class="w-full px-3.5 py-2 text-xs sm:text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-brand font-mono font-bold" />
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              <div>
+                <label class="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  Fecha de la Seña <span class="text-danger">*</span>
+                </label>
+                <input type="date" id="inp-sena-fecha" value="${escapeHtml(state.form.fechaSena || getTodayIsoDate())}"
+                  class="w-full px-3 py-1.5 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-brand font-semibold" />
+              </div>
+              <div>
+                <label class="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  Semana ISO
+                </label>
+                <div class="h-[34px] px-3 rounded-xl bg-purple-50/70 dark:bg-brand/10 border border-purple-200/80 dark:border-brand/30 flex items-center justify-between">
+                  <span class="text-xs font-bold text-brand flex items-center gap-1.5">
+                    <i class="fa-solid fa-calendar-week text-[11px]"></i>
+                    <span id="sena-semana-display">Semana ${state.form.semanaSenaIso || getISOWeekNumber(new Date())}</span>
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Método de Cobro de la Seña</label>
+              <select id="select-sena-metodo"
+                class="w-full px-3 py-1.5 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-brand font-semibold">
+                <option value="Efectivo" ${state.form.metodoPagoSena === 'Efectivo' ? 'selected' : ''}>Efectivo</option>
+                <option value="Transferencia Bancaria" ${state.form.metodoPagoSena === 'Transferencia Bancaria' ? 'selected' : ''}>Transferencia Bancaria</option>
+                <option value="Billetera Móvil" ${state.form.metodoPagoSena === 'Billetera Móvil' ? 'selected' : ''}>Billetera Móvil (Tigo Money / Personal)</option>
+                <option value="Tarjeta de Débito/Crédito" ${state.form.metodoPagoSena === 'Tarjeta de Débito/Crédito' ? 'selected' : ''}>Tarjeta de Débito/Crédito</option>
+                <option value="Cheque" ${state.form.metodoPagoSena === 'Cheque' ? 'selected' : ''}>Cheque</option>
+              </select>
+            </div>
+          </div>
+
+          <div id="sena-inactive-msg" class="${state.form.tieneSena ? 'hidden' : ''} p-3 rounded-xl bg-white dark:bg-slate-800/60 border border-dashed border-slate-200 dark:border-slate-700 text-center">
+            <p class="text-[11px] text-slate-400">
+              <i class="fa-solid fa-circle-info text-slate-400 mr-1"></i> Sin seña inicial registrada (el total quedará pendiente al entregar).
+            </p>
           </div>
         </div>
       </div>
@@ -2774,8 +2841,8 @@ export function renderPedidosModule(container) {
       </div>
       <div class="pt-2 border-t border-slate-200/80 dark:border-slate-700/60 text-xs flex flex-col gap-1.5 text-slate-500 dark:text-slate-400">
         <div class="flex items-center justify-between font-semibold">
-          <span>Ya Pagado:</span>
-          <span id="order-pagado-text" class="font-bold text-emerald-600 dark:text-emerald-400 font-mono">0 Gs.</span>
+          <span>Seña / Entrega:</span>
+          <span id="order-sena-text" class="font-bold text-emerald-600 dark:text-emerald-400 font-mono">0 Gs.</span>
         </div>
         <div class="flex items-center justify-between font-semibold">
           <span>Saldo Pendiente:</span>
@@ -2811,44 +2878,66 @@ export function renderPedidosModule(container) {
       const gt = cardCondiciones.querySelector('#order-grand-total');
       if (gt) gt.textContent = `Gs. ${Math.round(totalVenta).toLocaleString('es-PY')}`;
 
-      const isContado = state.form.condicionVenta === 'Contado';
       const condBadge = cardCondiciones.querySelector('#order-cond-badge');
-      const pagadoEl = cardCondiciones.querySelector('#order-pagado-text');
+      const senaEl = cardCondiciones.querySelector('#order-sena-text');
       const saldoElCard = cardCondiciones.querySelector('#order-saldo-text');
 
-      let montoAbonado = 0;
-      let saldo = 0;
+      const isContado = state.form.condicionVenta === 'Contado';
+      const tieneSena = Boolean(state.form.tieneSena);
+      let montoSena = tieneSena ? (Number(state.form.montoSena) || 0) : 0;
+      if (montoSena > totalVenta && totalVenta > 0) {
+        montoSena = totalVenta;
+        state.form.montoSena = montoSena;
+        const inpMonto = cardCondiciones.querySelector('#inp-sena-monto');
+        if (inpMonto) inpMonto.value = formatGuaranies(montoSena);
+      }
 
-      if (isContado) {
-        montoAbonado = totalVenta;
-        saldo = 0;
-        if (condBadge) {
-          condBadge.className =
-            'px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800';
-          condBadge.textContent = 'Contado · Totalmente Pagado';
-        }
-        if (pagadoEl) pagadoEl.textContent = formatGuaranies(montoAbonado);
-        if (saldoElCard) {
-          saldoElCard.textContent = '0 Gs.';
-          saldoElCard.className = 'font-bold text-emerald-600 dark:text-emerald-400 font-mono';
-        }
-      } else {
-        // Crédito
-        const isParcial = state.form.tipoPago === 'Parcial';
-        montoAbonado = isParcial ? (Number(state.form.montoAbonado) || 0) : 0;
-        saldo = Math.max(0, totalVenta - montoAbonado);
+      const saldo = Math.max(0, totalVenta - montoSena);
 
-        if (condBadge) {
+      if (senaEl) {
+        senaEl.textContent = formatGuaranies(montoSena);
+        senaEl.className = montoSena > 0
+          ? 'font-bold text-emerald-600 dark:text-emerald-400 font-mono'
+          : 'font-medium text-slate-400 font-mono';
+      }
+
+      if (saldoElCard) {
+        saldoElCard.textContent = formatGuaranies(saldo);
+        saldoElCard.className = saldo > 0
+          ? 'font-bold text-rose-600 dark:text-rose-400 font-mono'
+          : 'font-bold text-emerald-600 dark:text-emerald-400 font-mono';
+      }
+
+      if (condBadge) {
+        if (totalVenta === 0) {
           condBadge.className =
-            'px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-50 dark:bg-brand/20 text-brand border border-purple-200 dark:border-brand/40';
-          condBadge.textContent = isParcial ? 'Crédito (Pago Parcial / Seña)' : 'Crédito (Total a Plazo)';
-        }
-        if (pagadoEl) pagadoEl.textContent = formatGuaranies(montoAbonado);
-        if (saldoElCard) {
-          saldoElCard.textContent = formatGuaranies(saldo);
-          saldoElCard.className = saldo > 0
-            ? 'font-black text-rose-600 dark:text-rose-400 font-mono'
-            : 'font-bold text-emerald-600 dark:text-emerald-400 font-mono';
+            'px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-500 border border-slate-200 dark:border-slate-700';
+          condBadge.textContent = isContado ? 'Contado' : 'Crédito';
+        } else if (isContado) {
+          if (montoSena >= totalVenta) {
+            condBadge.className =
+              'px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800';
+            condBadge.textContent = 'Contado · Totalmente Pagado';
+          } else if (montoSena > 0) {
+            condBadge.className =
+              'px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800';
+            condBadge.textContent = 'Contado · Con Seña';
+          } else {
+            condBadge.className =
+              'px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-800';
+            condBadge.textContent = 'Contado · Pendiente';
+          }
+        } else {
+          // Crédito
+          if (montoSena > 0) {
+            condBadge.className =
+              'px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-50 dark:bg-brand/20 text-brand border border-purple-200 dark:border-brand/40';
+            condBadge.textContent = 'Crédito · Con Seña';
+          } else {
+            condBadge.className =
+              'px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-50 dark:bg-brand/20 text-brand border border-purple-200 dark:border-brand/40';
+            condBadge.textContent = 'Crédito · Total a Plazo';
+          }
         }
       }
 
@@ -2861,17 +2950,6 @@ export function renderPedidosModule(container) {
         marginEl.className = margen >= 0
           ? 'font-bold text-emerald-600 dark:text-emerald-400 font-mono'
           : 'font-bold text-rose-600 dark:text-rose-400 font-mono';
-      }
-
-      // Actualizar saldo de crédito en tiempo real
-      const saldoEl = condLeft.querySelector('#credito-saldo-calc');
-      if (saldoEl) {
-        saldoEl.textContent = formatGuaranies(saldo);
-        if (saldo > 0) {
-          saldoEl.className = 'text-sm font-black text-rose-600 dark:text-rose-400 font-mono';
-        } else {
-          saldoEl.className = 'text-sm font-black text-emerald-600 dark:text-emerald-400 font-mono';
-        }
       }
     }
 
@@ -2907,23 +2985,68 @@ export function renderPedidosModule(container) {
       state.form.fechaCobro = e.target.value;
     });
 
-    const selTipoPago = condLeft.querySelector('#credito-tipo-pago');
-    const parcWrap = condLeft.querySelector('#parcial-wrap');
-    selTipoPago.addEventListener('change', (e) => {
-      state.form.tipoPago = e.target.value;
-      if (state.form.tipoPago === 'Parcial') {
-        parcWrap.classList.remove('hidden');
+    // Event listeners para SEÑA
+    const toggleSena = condLeft.querySelector('#toggle-sena');
+    const senaActiveWrap = condLeft.querySelector('#sena-active-wrap');
+    const senaInactiveMsg = condLeft.querySelector('#sena-inactive-msg');
+    const inpSenaMonto = condLeft.querySelector('#inp-sena-monto');
+    const inpSenaFecha = condLeft.querySelector('#inp-sena-fecha');
+    const senaSemanaDisplay = condLeft.querySelector('#sena-semana-display');
+
+    toggleSena?.addEventListener('change', (e) => {
+      state.form.tieneSena = e.target.checked;
+      if (state.form.tieneSena) {
+        senaActiveWrap.classList.remove('hidden');
+        senaInactiveMsg.classList.add('hidden');
+        if (!state.form.fechaSena) {
+          state.form.fechaSena = state.form.fechaPedido || getTodayIsoDate();
+        }
+        if (inpSenaFecha) inpSenaFecha.value = state.form.fechaSena;
+        const d = new Date(state.form.fechaSena + 'T00:00:00');
+        state.form.semanaSenaIso = getISOWeekNumber(d);
+        if (senaSemanaDisplay) senaSemanaDisplay.textContent = `Semana ${state.form.semanaSenaIso}`;
       } else {
-        parcWrap.classList.add('hidden');
+        senaActiveWrap.classList.add('hidden');
+        senaInactiveMsg.classList.remove('hidden');
+        state.form.montoSena = 0;
+        if (inpSenaMonto) inpSenaMonto.value = '0 Gs.';
       }
       updateTotalOrderCard();
     });
 
-    const abonadoInp = condLeft.querySelector('#credito-monto-abonado');
-    abonadoInp?.addEventListener('input', (e) => {
-      state.form.montoAbonado = parseGuaranies(e.target.value);
-      e.target.value = formatGuaranies(state.form.montoAbonado);
+    inpSenaMonto?.addEventListener('input', (e) => {
+      state.form.montoSena = parseGuaranies(e.target.value);
+      e.target.value = formatGuaranies(state.form.montoSena);
       updateTotalOrderCard();
+    });
+
+    condLeft.querySelector('#btn-sena-50')?.addEventListener('click', () => {
+      let totalVenta = 0;
+      state.form.items.forEach((it) => { totalVenta += Number(it.subtotal) || 0; });
+      state.form.montoSena = Math.round(totalVenta * 0.5);
+      if (inpSenaMonto) inpSenaMonto.value = formatGuaranies(state.form.montoSena);
+      updateTotalOrderCard();
+    });
+
+    condLeft.querySelector('#btn-sena-100')?.addEventListener('click', () => {
+      let totalVenta = 0;
+      state.form.items.forEach((it) => { totalVenta += Number(it.subtotal) || 0; });
+      state.form.montoSena = totalVenta;
+      if (inpSenaMonto) inpSenaMonto.value = formatGuaranies(state.form.montoSena);
+      updateTotalOrderCard();
+    });
+
+    inpSenaFecha?.addEventListener('input', (e) => {
+      state.form.fechaSena = e.target.value;
+      if (e.target.value) {
+        const d = new Date(e.target.value + 'T00:00:00');
+        state.form.semanaSenaIso = getISOWeekNumber(d);
+        if (senaSemanaDisplay) senaSemanaDisplay.textContent = `Semana ${state.form.semanaSenaIso}`;
+      }
+    });
+
+    condLeft.querySelector('#select-sena-metodo')?.addEventListener('change', (e) => {
+      state.form.metodoPagoSena = e.target.value;
     });
 
     updateTotalOrderCard();
@@ -2997,7 +3120,12 @@ export function renderPedidosModule(container) {
             condicionVenta: state.form.condicionVenta,
             tipoPago: state.form.condicionVenta === 'Credito' ? state.form.tipoPago : null,
             fechaCobro: state.form.condicionVenta === 'Credito' ? state.form.fechaCobro : null,
-            montoAbonado: state.form.condicionVenta === 'Credito' ? state.form.montoAbonado : 0,
+            tieneSena: Boolean(state.form.tieneSena),
+            montoSena: state.form.tieneSena ? (Number(state.form.montoSena) || 0) : 0,
+            fechaSena: state.form.tieneSena ? (state.form.fechaSena || getTodayIsoDate()) : null,
+            semanaSenaIso: state.form.tieneSena ? (Number(state.form.semanaSenaIso) || null) : null,
+            metodoPagoSena: state.form.tieneSena ? (state.form.metodoPagoSena || 'Efectivo') : null,
+            montoAbonado: state.form.tieneSena ? (Number(state.form.montoSena) || 0) : (state.form.condicionVenta === 'Credito' ? (Number(state.form.montoAbonado) || 0) : 0),
             modalidadEntrega: state.form.modalidadEntrega,
             modalidadEntregaOtro: state.form.modalidadEntregaOtro.trim(),
             notasProduccion: state.form.notasProduccion.trim(),
@@ -3053,6 +3181,11 @@ export function renderPedidosModule(container) {
         condicionVenta: full.condicionVenta || 'Contado',
         tipoPago: full.tipoPago || 'Total',
         fechaCobro: full.fechaCobro || '',
+        tieneSena: Boolean(full.tieneSena || (Number(full.montoSena) > 0) || (Number(full.montoPagado) > 0)),
+        montoSena: Number(full.montoSena || full.montoPagado || 0),
+        fechaSena: full.fechaSena || full.fechaPedido || getTodayIsoDate(),
+        semanaSenaIso: full.semanaSenaIso || (full.fechaSena ? getISOWeekNumber(new Date(full.fechaSena + 'T00:00:00')) : getISOWeekNumber(new Date())),
+        metodoPagoSena: full.metodoPagoSena || 'Efectivo',
         montoAbonado: Number(full.montoPagado) || 0,
         modalidadEntrega: full.modalidadEntrega || 'Retiro en Local',
         modalidadEntregaOtro: full.modalidadEntregaOtro || '',
@@ -3862,7 +3995,28 @@ export function renderPedidosModule(container) {
           <span class="font-bold text-slate-800 dark:text-slate-200">${escapeHtml(p.condicionVenta)}</span>
         </div>
         ${
-          p.condicionVenta === 'Credito'
+          p.tieneSena && Number(p.montoSena) > 0
+            ? `
+          <div class="flex items-center justify-between">
+            <span class="text-slate-400">Seña / Entrega:</span>
+            <span class="font-bold text-emerald-600 font-mono">${formatGuaranies(p.montoSena)}</span>
+          </div>
+          <div class="flex items-center justify-between">
+            <span class="text-slate-400">Fecha de la Seña:</span>
+            <span class="font-semibold text-slate-700 dark:text-slate-300">
+              ${formatDateOnly(p.fechaSena)} ${p.semanaSenaIso ? `<span class="text-[10px] px-1.5 py-0.5 rounded bg-brand/10 text-brand font-bold ml-1">Semana ${p.semanaSenaIso}</span>` : ''}
+            </span>
+          </div>
+          <div class="flex items-center justify-between">
+            <span class="text-slate-400">Método de Seña:</span>
+            <span class="font-semibold text-slate-700 dark:text-slate-300">${escapeHtml(p.metodoPagoSena || 'Efectivo')}</span>
+          </div>
+          <div class="flex items-center justify-between">
+            <span class="text-slate-400">Saldo Pendiente:</span>
+            <span class="font-black ${Number(p.saldoPendiente) > 0 ? 'text-rose-600 font-mono' : 'text-emerald-600 font-mono'}">${formatGuaranies(p.saldoPendiente)}</span>
+          </div>
+        `
+            : p.condicionVenta === 'Credito'
             ? `
           <div class="flex items-center justify-between">
             <span class="text-slate-400">Vencimiento / Cobro:</span>
@@ -3874,17 +4028,21 @@ export function renderPedidosModule(container) {
           </div>
           <div class="flex items-center justify-between">
             <span class="text-slate-400">Monto Abonado:</span>
-            <span class="font-bold text-emerald-600">${formatGuaranies(p.montoPagado)}</span>
+            <span class="font-bold text-emerald-600 font-mono">${formatGuaranies(p.montoPagado)}</span>
           </div>
           <div class="flex items-center justify-between">
             <span class="text-slate-400">Saldo Pendiente:</span>
-            <span class="font-black ${Number(p.saldoPendiente) > 0 ? 'text-rose-600' : 'text-emerald-600'}">${formatGuaranies(p.saldoPendiente)}</span>
+            <span class="font-black ${Number(p.saldoPendiente) > 0 ? 'text-rose-600 font-mono' : 'text-emerald-600 font-mono'}">${formatGuaranies(p.saldoPendiente)}</span>
           </div>
         `
             : `
           <div class="flex items-center justify-between">
-            <span class="text-slate-400">Estado de Pago:</span>
-            <span class="font-bold text-emerald-600">Totalmente Pagado</span>
+            <span class="text-slate-400">Seña / Anticipo:</span>
+            <span class="text-slate-400 font-medium">Sin seña registrada</span>
+          </div>
+          <div class="flex items-center justify-between">
+            <span class="text-slate-400">Saldo Pendiente:</span>
+            <span class="font-black ${Number(p.saldoPendiente) > 0 ? 'text-rose-600 font-mono' : 'text-emerald-600 font-mono'}">${formatGuaranies(p.saldoPendiente)}</span>
           </div>
         `
         }

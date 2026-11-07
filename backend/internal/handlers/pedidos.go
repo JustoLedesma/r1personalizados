@@ -116,6 +116,13 @@ func (h *PedidosHandler) ensureSchema() {
 	_, _ = h.DB.Exec("ALTER TABLE pedido_proveedores ADD COLUMN estado_pago ENUM('Pendiente', 'Pagado', 'Pago Parcial') NOT NULL DEFAULT 'Pendiente' AFTER subtotal")
 	_, _ = h.DB.Exec("ALTER TABLE pedido_proveedores ADD COLUMN monto_pagado DECIMAL(15,2) NOT NULL DEFAULT 0 AFTER estado_pago")
 	_, _ = h.DB.Exec("ALTER TABLE pedido_proveedores ADD COLUMN saldo_pendiente DECIMAL(15,2) NOT NULL DEFAULT 0 AFTER monto_pagado")
+
+	// Columnas para Seña en pedidos
+	_, _ = h.DB.Exec("ALTER TABLE pedidos ADD COLUMN tiene_sena TINYINT(1) NOT NULL DEFAULT 0 AFTER fecha_cobro")
+	_, _ = h.DB.Exec("ALTER TABLE pedidos ADD COLUMN monto_sena DECIMAL(15,2) NOT NULL DEFAULT 0 AFTER tiene_sena")
+	_, _ = h.DB.Exec("ALTER TABLE pedidos ADD COLUMN fecha_sena DATE NULL DEFAULT NULL AFTER monto_sena")
+	_, _ = h.DB.Exec("ALTER TABLE pedidos ADD COLUMN semana_sena_iso INT NULL DEFAULT NULL AFTER fecha_sena")
+	_, _ = h.DB.Exec("ALTER TABLE pedidos ADD COLUMN metodo_pago_sena VARCHAR(60) NULL DEFAULT 'Efectivo' AFTER semana_sena_iso")
 }
 
 func (h *PedidosHandler) getActorName(r *http.Request) string {
@@ -306,6 +313,7 @@ func (h *PedidosHandler) List(w http.ResponseWriter, r *http.Request) {
 			COALESCE(p.cliente_telefono, ''), COALESCE(p.cliente_documento, ''), COALESCE(p.cliente_direccion, ''),
 			p.condicion_venta, COALESCE(DATE_FORMAT(p.fecha_pedido, '%%Y-%%m-%%d'), DATE_FORMAT(p.created_at, '%%Y-%%m-%%d')),
 			p.tipo_pago, DATE_FORMAT(p.fecha_cobro, '%%Y-%%m-%%d'),
+			p.tiene_sena, p.monto_sena, DATE_FORMAT(p.fecha_sena, '%%Y-%%m-%%d'), p.semana_sena_iso, COALESCE(p.metodo_pago_sena, 'Efectivo'),
 			p.monto_total, p.monto_pagado, p.saldo_pendiente,
 			p.modalidad_entrega, COALESCE(p.modalidad_entrega_otro, ''),
 			p.estado, p.semana_iso, p.anio_iso, COALESCE(p.notas_produccion, ''),
@@ -329,13 +337,15 @@ func (h *PedidosHandler) List(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var p models.Pedido
 		var clienteID sql.NullInt64
-		var tipoPago, fechaCobro sql.NullString
+		var tipoPago, fechaCobro, fechaSena sql.NullString
+		var semanaSenaIso sql.NullInt64
 		var fechaPedido string
 
 		if err := rows.Scan(
 			&p.ID, &p.NumeroPedido, &clienteID, &p.ClienteCasual, &p.ClienteNombre,
 			&p.ClienteTelefono, &p.ClienteDocumento, &p.ClienteDireccion,
 			&p.CondicionVenta, &fechaPedido, &tipoPago, &fechaCobro,
+			&p.TieneSena, &p.MontoSena, &fechaSena, &semanaSenaIso, &p.MetodoPagoSena,
 			&p.MontoTotal, &p.MontoPagado, &p.SaldoPendiente,
 			&p.ModalidadEntrega, &p.ModalidadEntregaOtro,
 			&p.Estado, &p.SemanaISO, &p.AnioISO, &p.NotasProduccion,
@@ -358,6 +368,14 @@ func (h *PedidosHandler) List(w http.ResponseWriter, r *http.Request) {
 		if fechaCobro.Valid && fechaCobro.String != "" {
 			fc := fechaCobro.String
 			p.FechaCobro = &fc
+		}
+		if fechaSena.Valid && fechaSena.String != "" {
+			fs := fechaSena.String
+			p.FechaSena = &fs
+		}
+		if semanaSenaIso.Valid {
+			ws := int(semanaSenaIso.Int64)
+			p.SemanaSenaISO = &ws
 		}
 
 		pedidos = append(pedidos, p)
@@ -488,6 +506,7 @@ func (h *PedidosHandler) GetByID(w http.ResponseWriter, r *http.Request, id int)
 			COALESCE(cliente_telefono, ''), COALESCE(cliente_documento, ''), COALESCE(cliente_direccion, ''),
 			condicion_venta, COALESCE(DATE_FORMAT(fecha_pedido, '%Y-%m-%d'), DATE_FORMAT(created_at, '%Y-%m-%d')),
 			tipo_pago, DATE_FORMAT(fecha_cobro, '%Y-%m-%d'),
+			tiene_sena, monto_sena, DATE_FORMAT(fecha_sena, '%Y-%m-%d'), semana_sena_iso, COALESCE(metodo_pago_sena, 'Efectivo'),
 			monto_total, monto_pagado, saldo_pendiente,
 			modalidad_entrega, COALESCE(modalidad_entrega_otro, ''),
 			estado,
@@ -503,7 +522,8 @@ func (h *PedidosHandler) GetByID(w http.ResponseWriter, r *http.Request, id int)
 
 	var p models.Pedido
 	var clienteID sql.NullInt64
-	var tipoPago, fechaCobro sql.NullString
+	var tipoPago, fechaCobro, fechaSena sql.NullString
+	var semanaSenaIso sql.NullInt64
 	var fechaEnProd, fechaEnPausa, fechaListo, histEstados sql.NullString
 	var fechaPedido string
 
@@ -511,6 +531,7 @@ func (h *PedidosHandler) GetByID(w http.ResponseWriter, r *http.Request, id int)
 		&p.ID, &p.NumeroPedido, &clienteID, &p.ClienteCasual, &p.ClienteNombre,
 		&p.ClienteTelefono, &p.ClienteDocumento, &p.ClienteDireccion,
 		&p.CondicionVenta, &fechaPedido, &tipoPago, &fechaCobro,
+		&p.TieneSena, &p.MontoSena, &fechaSena, &semanaSenaIso, &p.MetodoPagoSena,
 		&p.MontoTotal, &p.MontoPagado, &p.SaldoPendiente,
 		&p.ModalidadEntrega, &p.ModalidadEntregaOtro,
 		&p.Estado,
@@ -539,6 +560,14 @@ func (h *PedidosHandler) GetByID(w http.ResponseWriter, r *http.Request, id int)
 	if fechaCobro.Valid && fechaCobro.String != "" {
 		fc := fechaCobro.String
 		p.FechaCobro = &fc
+	}
+	if fechaSena.Valid && fechaSena.String != "" {
+		fs := fechaSena.String
+		p.FechaSena = &fs
+	}
+	if semanaSenaIso.Valid {
+		ws := int(semanaSenaIso.Int64)
+		p.SemanaSenaISO = &ws
 	}
 
 	if fechaEnProd.Valid && fechaEnProd.String != "" {
@@ -650,6 +679,11 @@ type CreatePedidoRequest struct {
 	FechaPedido          *string                  `json:"fechaPedido"`
 	TipoPago             *string                  `json:"tipoPago"`
 	FechaCobro           *string                  `json:"fechaCobro"`
+	TieneSena            bool                     `json:"tieneSena"`
+	MontoSena            float64                  `json:"montoSena"`
+	FechaSena            *string                  `json:"fechaSena"`
+	SemanaSenaISO        *int                     `json:"semanaSenaIso"`
+	MetodoPagoSena       string                   `json:"metodoPagoSena"`
 	MontoAbonado         float64                  `json:"montoAbonado"`
 	ModalidadEntrega     string                   `json:"modalidadEntrega"`
 	ModalidadEntregaOtro string                   `json:"modalidadEntregaOtro"`
@@ -720,37 +754,68 @@ func (h *PedidosHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var montoPagado, saldoPendiente float64
-	var tipoPago, fechaCobro *string
+	var tipoPago, fechaCobro, fechaSena *string
+	var semanaSenaISO *int
+	var montoSena float64
+	tieneSena := req.TieneSena
+	metodoPagoSena := strings.TrimSpace(req.MetodoPagoSena)
+	if metodoPagoSena == "" {
+		metodoPagoSena = "Efectivo"
+	}
 
-	if condicion == "Contado" {
-		montoPagado = montoTotal
-		saldoPendiente = 0
-	} else {
-		// Crédito
-		if req.FechaCobro != nil && strings.TrimSpace(*req.FechaCobro) != "" {
-			fcClean := strings.TrimSpace(*req.FechaCobro)
-			fechaCobro = &fcClean
+	if tieneSena && req.MontoSena > 0 {
+		montoSena = req.MontoSena
+		if montoSena > montoTotal {
+			montoSena = montoTotal
 		}
+		montoPagado = montoSena
+		saldoPendiente = mathMaxZero(montoTotal - montoSena)
 
-		tpVal := "Total"
-		if req.TipoPago != nil && *req.TipoPago == "Parcial" {
-			tpVal = "Parcial"
-		}
-		tipoPago = &tpVal
-
-		if tpVal == "Parcial" {
-			montoPagado = req.MontoAbonado
-			if montoPagado < 0 {
-				montoPagado = 0
+		if req.FechaSena != nil && strings.TrimSpace(*req.FechaSena) != "" {
+			fsClean := strings.TrimSpace(*req.FechaSena)
+			fechaSena = &fsClean
+			if t, err := time.Parse("2006-01-02", fsClean); err == nil {
+				_, wIso := t.ISOWeek()
+				semanaSenaISO = &wIso
 			}
-			if montoPagado > montoTotal {
-				montoPagado = montoTotal
-			}
-			saldoPendiente = montoTotal - montoPagado
 		} else {
+			todayStr := time.Now().Format("2006-01-02")
+			fechaSena = &todayStr
+			_, wIso := time.Now().ISOWeek()
+			semanaSenaISO = &wIso
+		}
+	} else {
+		tieneSena = false
+		montoSena = 0
+		if condicion == "Contado" {
 			montoPagado = 0
 			saldoPendiente = montoTotal
+		} else {
+			// Crédito sin seña
+			if req.FechaCobro != nil && strings.TrimSpace(*req.FechaCobro) != "" {
+				fcClean := strings.TrimSpace(*req.FechaCobro)
+				fechaCobro = &fcClean
+			}
+			tpVal := "Total"
+			if req.TipoPago != nil && *req.TipoPago == "Parcial" {
+				tpVal = "Parcial"
+			}
+			tipoPago = &tpVal
+			if tpVal == "Parcial" && req.MontoAbonado > 0 {
+				montoPagado = req.MontoAbonado
+				if montoPagado > montoTotal {
+					montoPagado = montoTotal
+				}
+				saldoPendiente = mathMaxZero(montoTotal - montoPagado)
+			} else {
+				montoPagado = 0
+				saldoPendiente = montoTotal
+			}
 		}
+	}
+	if condicion == "Credito" && req.FechaCobro != nil && strings.TrimSpace(*req.FechaCobro) != "" {
+		fcClean := strings.TrimSpace(*req.FechaCobro)
+		fechaCobro = &fcClean
 	}
 
 	modalidad := strings.TrimSpace(req.ModalidadEntrega)
@@ -786,16 +851,18 @@ func (h *PedidosHandler) Create(w http.ResponseWriter, r *http.Request) {
 			numero_pedido, cliente_id, cliente_casual, cliente_nombre,
 			cliente_telefono, cliente_documento, cliente_direccion,
 			condicion_venta, fecha_pedido, tipo_pago, fecha_cobro,
+			tiene_sena, monto_sena, fecha_sena, semana_sena_iso, metodo_pago_sena,
 			monto_total, monto_pagado, saldo_pendiente,
 			modalidad_entrega, modalidad_entrega_otro,
 			estado, historial_estados, semana_iso, anio_iso, notas_produccion
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Creado', JSON_ARRAY(JSON_OBJECT('estado', 'Creado', 'fecha', DATE_FORMAT(NOW(), '%Y-%m-%d %H:%i:%s'))), ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Creado', JSON_ARRAY(JSON_OBJECT('estado', 'Creado', 'fecha', DATE_FORMAT(NOW(), '%Y-%m-%d %H:%i:%s'))), ?, ?, ?)
 	`
 
 	res, err := tx.ExecContext(r.Context(), insertOrderSQL,
 		numeroPedido, req.ClienteID, req.ClienteCasual, req.ClienteNombre,
 		req.ClienteTelefono, req.ClienteDocumento, req.ClienteDireccion,
 		condicion, fechaPedidoStr, tipoPago, fechaCobro,
+		tieneSena, montoSena, fechaSena, semanaSenaISO, metodoPagoSena,
 		montoTotal, montoPagado, saldoPendiente,
 		modalidad, req.ModalidadEntregaOtro,
 		semanaISO, anioISO, req.NotasProduccion,
@@ -1053,36 +1120,68 @@ func (h *PedidosHandler) Update(w http.ResponseWriter, r *http.Request, id int) 
 	}
 
 	var montoPagado, saldoPendiente float64
-	var tipoPago, fechaCobro *string
+	var tipoPago, fechaCobro, fechaSena *string
+	var semanaSenaISO *int
+	var montoSena float64
+	tieneSena := req.TieneSena
+	metodoPagoSena := strings.TrimSpace(req.MetodoPagoSena)
+	if metodoPagoSena == "" {
+		metodoPagoSena = "Efectivo"
+	}
 
-	if condicion == "Contado" {
-		montoPagado = montoTotal
-		saldoPendiente = 0
-	} else {
-		if req.FechaCobro != nil && strings.TrimSpace(*req.FechaCobro) != "" {
-			fcClean := strings.TrimSpace(*req.FechaCobro)
-			fechaCobro = &fcClean
+	if tieneSena && req.MontoSena > 0 {
+		montoSena = req.MontoSena
+		if montoSena > montoTotal {
+			montoSena = montoTotal
 		}
+		montoPagado = montoSena
+		saldoPendiente = mathMaxZero(montoTotal - montoSena)
 
-		tpVal := "Total"
-		if req.TipoPago != nil && *req.TipoPago == "Parcial" {
-			tpVal = "Parcial"
-		}
-		tipoPago = &tpVal
-
-		if tpVal == "Parcial" {
-			montoPagado = req.MontoAbonado
-			if montoPagado < 0 {
-				montoPagado = 0
+		if req.FechaSena != nil && strings.TrimSpace(*req.FechaSena) != "" {
+			fsClean := strings.TrimSpace(*req.FechaSena)
+			fechaSena = &fsClean
+			if t, err := time.Parse("2006-01-02", fsClean); err == nil {
+				_, wIso := t.ISOWeek()
+				semanaSenaISO = &wIso
 			}
-			if montoPagado > montoTotal {
-				montoPagado = montoTotal
-			}
-			saldoPendiente = montoTotal - montoPagado
 		} else {
+			todayStr := time.Now().Format("2006-01-02")
+			fechaSena = &todayStr
+			_, wIso := time.Now().ISOWeek()
+			semanaSenaISO = &wIso
+		}
+	} else {
+		tieneSena = false
+		montoSena = 0
+		if condicion == "Contado" {
 			montoPagado = 0
 			saldoPendiente = montoTotal
+		} else {
+			// Crédito sin seña
+			if req.FechaCobro != nil && strings.TrimSpace(*req.FechaCobro) != "" {
+				fcClean := strings.TrimSpace(*req.FechaCobro)
+				fechaCobro = &fcClean
+			}
+			tpVal := "Total"
+			if req.TipoPago != nil && *req.TipoPago == "Parcial" {
+				tpVal = "Parcial"
+			}
+			tipoPago = &tpVal
+			if tpVal == "Parcial" && req.MontoAbonado > 0 {
+				montoPagado = req.MontoAbonado
+				if montoPagado > montoTotal {
+					montoPagado = montoTotal
+				}
+				saldoPendiente = mathMaxZero(montoTotal - montoPagado)
+			} else {
+				montoPagado = 0
+				saldoPendiente = montoTotal
+			}
 		}
+	}
+	if condicion == "Credito" && req.FechaCobro != nil && strings.TrimSpace(*req.FechaCobro) != "" {
+		fcClean := strings.TrimSpace(*req.FechaCobro)
+		fechaCobro = &fcClean
 	}
 
 	modalidad := strings.TrimSpace(req.ModalidadEntrega)
@@ -1111,6 +1210,7 @@ func (h *PedidosHandler) Update(w http.ResponseWriter, r *http.Request, id int) 
 			cliente_id = ?, cliente_casual = ?, cliente_nombre = ?,
 			cliente_telefono = ?, cliente_documento = ?, cliente_direccion = ?,
 			condicion_venta = ?, fecha_pedido = ?, tipo_pago = ?, fecha_cobro = ?,
+			tiene_sena = ?, monto_sena = ?, fecha_sena = ?, semana_sena_iso = ?, metodo_pago_sena = ?,
 			monto_total = ?, monto_pagado = ?, saldo_pendiente = ?,
 			modalidad_entrega = ?, modalidad_entrega_otro = ?,
 			semana_iso = ?, anio_iso = ?,
@@ -1121,6 +1221,7 @@ func (h *PedidosHandler) Update(w http.ResponseWriter, r *http.Request, id int) 
 		req.ClienteID, req.ClienteCasual, req.ClienteNombre,
 		req.ClienteTelefono, req.ClienteDocumento, req.ClienteDireccion,
 		condicion, fechaPedidoStr, tipoPago, fechaCobro,
+		tieneSena, montoSena, fechaSena, semanaSenaISO, metodoPagoSena,
 		montoTotal, montoPagado, saldoPendiente,
 		modalidad, req.ModalidadEntregaOtro,
 		semanaISO, anioISO,
@@ -1293,4 +1394,12 @@ func (h *PedidosHandler) SoftDelete(w http.ResponseWriter, r *http.Request, id i
 		"message": "Pedido enviado a la papelera de reciclaje exitosamente",
 	})
 }
+
+func mathMaxZero(v float64) float64 {
+	if v < 0 {
+		return 0
+	}
+	return v
+}
+
 

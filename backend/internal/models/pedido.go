@@ -15,6 +15,11 @@ type Pedido struct {
 	FechaPedido          string             `json:"fechaPedido"` // 'YYYY-MM-DD'
 	TipoPago             *string            `json:"tipoPago,omitempty"` // 'Total' | 'Parcial'
 	FechaCobro           *string            `json:"fechaCobro,omitempty"` // 'YYYY-MM-DD'
+	TieneSena            bool               `json:"tieneSena"`
+	MontoSena            float64            `json:"montoSena"`
+	FechaSena            *string            `json:"fechaSena,omitempty"` // 'YYYY-MM-DD'
+	SemanaSenaISO        *int               `json:"semanaSenaIso,omitempty"`
+	MetodoPagoSena       string             `json:"metodoPagoSena,omitempty"`
 	MontoTotal           float64            `json:"montoTotal"`
 	MontoPagado          float64            `json:"montoPagado"`
 	SaldoPendiente       float64            `json:"saldoPendiente"`
